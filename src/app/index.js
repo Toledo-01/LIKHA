@@ -56,9 +56,10 @@ function formatProducts(data) {
 
 export default function HomeScreen() {
   const { user, isLoading: authLoading } = useAuth();
-  const { cartCount } = useCart();
+  const { cartCount, addToCart } = useCart();
 
   const [products, setProducts] = useState([]);
+  const [imageErrors, setImageErrors] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState("");
   const [search, setSearch] = useState("");
@@ -66,6 +67,24 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState("Home");
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+
+  const categories = useMemo(() => {
+    const categoryNames = [
+      ...new Set(
+        products
+          .map((product) => product.category)
+          .filter(Boolean)
+      ),
+    ];
+
+    return [
+      { name: "All", icon: "✨" },
+      ...categoryNames.map((name) => ({
+        name,
+        icon: "🛍️",
+      })),
+    ];
+  }, [products]);
 
   async function loadProducts() {
     try {
@@ -144,7 +163,6 @@ export default function HomeScreen() {
       ? favoriteIds.filter((id) => id !== productId)
       : [...favoriteIds, productId];
 
-    // Save first so the displayed state stays consistent with storage.
     try {
       await AsyncStorage.setItem(
         FAVORITES_KEY,
@@ -165,6 +183,17 @@ export default function HomeScreen() {
     }
   }
 
+  // Buy Now: skip the cart screen and go straight to checkout with this one item.
+  // Sends "buyNowProductId" — the exact param name CheckoutScreen reads.
+  function handleBuyNow(product) {
+    router.push({
+      pathname: "/checkout",
+      params: {
+        buyNowProductId: String(product.id),
+      },
+    });
+  }
+
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -177,7 +206,7 @@ export default function HomeScreen() {
         !query ||
         product.name.toLowerCase().includes(query) ||
         product.seller.toLowerCase().includes(query) ||
-        product.category.toLowerCase().includes(query);
+        (product.category || "").toLowerCase().includes(query);
 
       return matchesCategory && matchesSearch;
     });
@@ -198,8 +227,8 @@ export default function HomeScreen() {
     return <Redirect href="/login" />;
   }
   if (user.role === "admin") {
-  return <Redirect href="/admin" />;
-}
+    return <Redirect href="/admin" />;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -374,9 +403,33 @@ export default function HomeScreen() {
                           { backgroundColor: product.color },
                         ]}
                       >
-                        <Text style={styles.productEmoji}>
-                          {product.emoji}
-                        </Text>
+                        {product.image_url && !imageErrors[product.id] ? (
+                          <Image
+                            source={{ uri: product.image_url.trim() }}
+                            style={styles.productImagePhoto}
+                            resizeMode="cover"
+                            onError={(error) => {
+                              console.log(
+                                `Product image failed to load: ${product.name}`,
+                                error.nativeEvent?.error
+                              );
+
+                              setImageErrors((previous) => ({
+                                ...previous,
+                                [product.id]: true,
+                              }));
+                            }}
+                          />
+                        ) : (
+                          <View style={styles.imageFallback}>
+                            <Text style={styles.productEmoji}>
+                              {product.emoji}
+                            </Text>
+                            <Text style={styles.imageFallbackText}>
+                              Image unavailable
+                            </Text>
+                          </View>
+                        )}
 
                         <View style={styles.localBadge}>
                           <Text style={styles.localBadgeText}>LOCAL</Text>
@@ -385,7 +438,7 @@ export default function HomeScreen() {
 
                       <View style={styles.productInfo}>
                         <Text style={styles.productCategory}>
-                          {product.category.toUpperCase()}
+                          {(product.category || "Uncategorized").toUpperCase()}
                         </Text>
                         <Text style={styles.productName} numberOfLines={1}>
                           {product.name}
@@ -398,6 +451,27 @@ export default function HomeScreen() {
                         </Text>
                       </View>
                     </TouchableOpacity>
+
+                    {/* Action buttons: Add to Cart + Buy Now */}
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.addToCartButton]}
+                        activeOpacity={0.85}
+                        onPress={() => addToCart(product)}
+                        accessibilityLabel={`Add ${product.name} to cart`}
+                      >
+                        <Text style={styles.actionButtonText}>Add to Cart</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.buyNowButton]}
+                        activeOpacity={0.85}
+                        onPress={() => handleBuyNow(product)}
+                        accessibilityLabel={`Buy ${product.name} now`}
+                      >
+                        <Text style={styles.actionButtonText}>Buy Now</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     {/* Favorite heart button */}
                     <TouchableOpacity
@@ -467,7 +541,7 @@ export default function HomeScreen() {
                   } else if (tab.name === "Home") {
                     router.replace("/");
                   } else if (tab.name === "Explore") {
-                     router.push("/explore");
+                    router.push("/explore");
                   } else if (tab.name === "Profile") {
                     router.push("/profile");
                   } else if (tab.name === "Favorites") {
@@ -491,44 +565,26 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#FAF9F5",
-  },
-  page: {
-    flex: 1,
-    backgroundColor: "#FAF9F5",
-  },
-  authLoading: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  authLoadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#54745B",
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 110,
-  },
+  safeArea: { flex: 1, backgroundColor: "#FAF9F5" },
+  page: { flex: 1, backgroundColor: "#FAF9F5" },
+  authLoading: { flex: 1, alignItems: "center", justifyContent: "center" },
+  authLoadingText: { marginTop: 12, fontSize: 14, color: "#54745B" },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 110 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 22,
   },
-  brandRow: {
-    flexDirection: "row",
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  logo: { width: 48, height: 48 },
+  imageFallback: {
+    width: "100%",
+    height: "100%",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "center",
   },
-  logo: {
-    width: 48,
-    height: 48,
-  },
+  imageFallbackText: { fontSize: 9, color: "#78907B", marginTop: 4 },
   brandName: {
     fontSize: 21,
     fontWeight: "800",
@@ -542,6 +598,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 2,
   },
+  productImagePhoto: { width: "100%", height: "100%" },
   bagButton: {
     width: 43,
     height: 43,
@@ -550,9 +607,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  bagIcon: {
-    fontSize: 20,
-  },
+  bagIcon: { fontSize: 20 },
   hero: {
     backgroundColor: "#E6EBDD",
     borderRadius: 25,
@@ -587,9 +642,7 @@ const styles = StyleSheet.create({
     gap: 7,
     marginTop: 8,
   },
-  heroEmoji: {
-    fontSize: 24,
-  },
+  heroEmoji: { fontSize: 24 },
   searchBox: {
     minHeight: 53,
     backgroundColor: "#FFFFFF",
@@ -601,35 +654,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     marginBottom: 26,
   },
-  searchIcon: {
-    fontSize: 28,
-    color: "#53745A",
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    color: "#263D2E",
-    paddingVertical: 12,
-  },
-  clearSearch: {
-    color: "#53745A",
-    fontSize: 16,
-    padding: 5,
-  },
-  sectionHeading: {
-    marginBottom: 14,
-  },
+  searchIcon: { fontSize: 28, color: "#53745A", marginRight: 10 },
+  searchInput: { flex: 1, fontSize: 13, color: "#263D2E", paddingVertical: 12 },
+  clearSearch: { color: "#53745A", fontSize: 16, padding: 5 },
+  sectionHeading: { marginBottom: 14 },
   sectionTitle: {
     fontSize: 19,
     fontWeight: "800",
     color: "#243E2D",
     letterSpacing: -0.4,
   },
-  categoryList: {
-    gap: 10,
-    paddingBottom: 25,
-  },
+  categoryList: { gap: 10, paddingBottom: 25 },
   categoryItem: {
     minWidth: 76,
     paddingVertical: 12,
@@ -640,38 +675,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#EAEAE2",
   },
-  categorySelected: {
-    backgroundColor: "#245B43",
-    borderColor: "#245B43",
-  },
-  categoryIcon: {
-    fontSize: 23,
-    marginBottom: 6,
-  },
-  categoryName: {
-    color: "#57675B",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  categoryNameSelected: {
-    color: "#FFFFFF",
-  },
+  categorySelected: { backgroundColor: "#245B43", borderColor: "#245B43" },
+  categoryIcon: { fontSize: 23, marginBottom: 6 },
+  categoryName: { color: "#57675B", fontSize: 11, fontWeight: "700" },
+  categoryNameSelected: { color: "#FFFFFF" },
   featuredHeading: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 15,
   },
-  sectionSubtitle: {
-    fontSize: 11,
-    color: "#829083",
-    marginTop: 5,
-  },
-  productCount: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#54745B",
-  },
+  sectionSubtitle: { fontSize: 11, color: "#829083", marginTop: 5 },
+  productCount: { fontSize: 11, fontWeight: "700", color: "#54745B" },
   productGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -693,9 +708,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
   },
-  productEmoji: {
-    fontSize: 63,
-  },
+  productEmoji: { fontSize: 63 },
   localBadge: {
     position: "absolute",
     top: 10,
@@ -728,17 +741,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
   },
-  favoriteHeart: {
-    fontSize: 25,
-    color: "#7A887C",
-    lineHeight: 30,
-  },
-  favoriteHeartActive: {
-    color: "#E63946",
-  },
-  productInfo: {
-    padding: 12,
-  },
+  favoriteHeart: { fontSize: 25, color: "#7A887C", lineHeight: 30 },
+  favoriteHeartActive: { color: "#E63946" },
+  productInfo: { padding: 12 },
   productCategory: {
     fontSize: 8,
     fontWeight: "800",
@@ -746,22 +751,30 @@ const styles = StyleSheet.create({
     color: "#78907B",
     marginBottom: 5,
   },
-  productName: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#2C4031",
-  },
-  sellerName: {
-    fontSize: 10,
-    color: "#899389",
-    marginTop: 4,
-  },
+  productName: { fontSize: 13, fontWeight: "800", color: "#2C4031" },
+  sellerName: { fontSize: 10, color: "#899389", marginTop: 4 },
   productPrice: {
     fontSize: 16,
     fontWeight: "900",
     color: "#245B43",
     marginTop: 10,
   },
+  cardActions: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  actionButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addToCartButton: { backgroundColor: "#245B43" },
+  buyNowButton: { backgroundColor: "#D66A4A" },
+  actionButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
   emptyState: {
     alignItems: "center",
     backgroundColor: "#FFFFFF",
@@ -769,9 +782,7 @@ const styles = StyleSheet.create({
     padding: 25,
     marginBottom: 20,
   },
-  emptyEmoji: {
-    fontSize: 36,
-  },
+  emptyEmoji: { fontSize: 36 },
   emptyTitle: {
     fontSize: 17,
     fontWeight: "800",
@@ -791,11 +802,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
   },
-  resetButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 12,
-  },
+  resetButtonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 12 },
   localMessage: {
     flexDirection: "row",
     alignItems: "center",
@@ -804,18 +811,9 @@ const styles = StyleSheet.create({
     padding: 16,
     marginTop: 24,
   },
-  localMessageEmoji: {
-    fontSize: 27,
-    marginRight: 12,
-  },
-  localMessageCopy: {
-    flex: 1,
-  },
-  localMessageTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#31513B",
-  },
+  localMessageEmoji: { fontSize: 27, marginRight: 12 },
+  localMessageCopy: { flex: 1 },
+  localMessageTitle: { fontSize: 13, fontWeight: "800", color: "#31513B" },
   localMessageDescription: {
     fontSize: 11,
     lineHeight: 17,
@@ -844,19 +842,9 @@ const styles = StyleSheet.create({
     minWidth: 60,
     gap: 3,
   },
-  navIcon: {
-    fontSize: 23,
-    color: "#9AA398",
-  },
-  navLabel: {
-    fontSize: 10,
-    color: "#9AA398",
-    fontWeight: "600",
-  },
-  navActive: {
-    color: "#245B43",
-    fontWeight: "900",
-  },
+  navIcon: { fontSize: 23, color: "#9AA398" },
+  navLabel: { fontSize: 10, color: "#9AA398", fontWeight: "600" },
+  navActive: { color: "#245B43", fontWeight: "900" },
   cartBadge: {
     position: "absolute",
     top: -5,
@@ -869,9 +857,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 4,
   },
-  cartBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-  },
+  cartBadgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
 });

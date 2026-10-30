@@ -13,7 +13,9 @@ import {
 import { Stack, useRouter } from "expo-router";
 import { getToken } from "../services/auth";
 
-const API_BASE_URL = "http://192.168.100.93:3000";
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
 function statusColor(status) {
   switch (String(status || "").toLowerCase()) {
@@ -281,6 +283,10 @@ export default function StaffProductsScreen() {
                     {product.name || "Unnamed product"}
                   </Text>
 
+                  <Text style={styles.productCategory} numberOfLines={1}>
+                    {(product.category || "Uncategorized").toUpperCase()}
+                  </Text>
+
                   <Text style={styles.productPrice}>
                     {formatPrice(product.price)}
                   </Text>
@@ -376,6 +382,14 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
+
+  productCategory: {
+  fontSize: 10,
+  color: "#647067",
+  marginTop: 3,
+  marginBottom: 3,
+},
+
   pageHeader: {
     marginBottom: 20,
   },

@@ -13,7 +13,9 @@ import {
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { getToken } from "../services/auth";
 
-const API_BASE_URL = "http://192.168.100.93:3000";
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
 function formatPrice(value) {
   const price = Number(value);
@@ -45,6 +47,7 @@ export default function StaffProductDetailsScreen() {
   const productId = Array.isArray(params.id) ? params.id[0] : params.id;
 
   const [product, setProduct] = useState(null);
+  const [imageError, setImageError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -52,6 +55,7 @@ export default function StaffProductDetailsScreen() {
   const loadProduct = useCallback(async () => {
     setErrorMessage("");
     setProduct(null);
+    setImageError(false);
 
     if (!productId || !/^\d+$/.test(String(productId))) {
       setErrorMessage("The product ID is missing or invalid.");
@@ -81,22 +85,33 @@ export default function StaffProductDetailsScreen() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setErrorMessage("Your session has expired. Please log in again.");
+          setErrorMessage(
+            "Your session has expired. Please log in again."
+          );
         } else if (response.status === 403) {
-          setErrorMessage("Access denied. A staff account is required.");
+          setErrorMessage(
+            "Access denied. A staff account is required."
+          );
         } else {
-          setErrorMessage(data.message || "Unable to load product details.");
+          setErrorMessage(
+            data.message || "Unable to load product details."
+          );
         }
+
         return;
       }
 
       if (!data.product) {
-        setErrorMessage("The server did not return product details.");
+        setErrorMessage(
+          "The server did not return product details."
+        );
         return;
       }
 
       setProduct(data.product);
     } catch (error) {
+      console.error("Load staff product error:", error);
+
       setErrorMessage(
         "Cannot connect to the server. Check that your backend is running."
       );
@@ -110,7 +125,9 @@ export default function StaffProductDetailsScreen() {
       setLoading(true);
       await loadProduct();
 
-      if (active) setLoading(false);
+      if (active) {
+        setLoading(false);
+      }
     }
 
     load();
@@ -122,9 +139,18 @@ export default function StaffProductDetailsScreen() {
 
   const refreshProduct = async () => {
     setRefreshing(true);
-    await loadProduct();
-    setRefreshing(false);
+
+    try {
+      await loadProduct();
+    } finally {
+      setRefreshing(false);
+    }
   };
+
+  const imageUrl =
+    typeof product?.image_url === "string"
+      ? product.image_url.trim()
+      : "";
 
   return (
     <>
@@ -146,6 +172,7 @@ export default function StaffProductDetailsScreen() {
         }
       >
         <Text style={styles.heading}>Product Inspection</Text>
+
         <Text style={styles.subtitle}>
           View product information submitted by the seller.
         </Text>
@@ -153,13 +180,18 @@ export default function StaffProductDetailsScreen() {
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color="#166534" />
-            <Text style={styles.helper}>Loading product details...</Text>
+            <Text style={styles.helper}>
+              Loading product details...
+            </Text>
           </View>
         ) : errorMessage ? (
           <View style={styles.card}>
             <Text style={styles.error}>{errorMessage}</Text>
 
-            <Pressable style={styles.button} onPress={refreshProduct}>
+            <Pressable
+              style={styles.button}
+              onPress={refreshProduct}
+            >
               <Text style={styles.buttonText}>Try Again</Text>
             </Pressable>
 
@@ -169,24 +201,47 @@ export default function StaffProductDetailsScreen() {
                 style={styles.outlineButton}
                 onPress={() => router.replace("/login")}
               >
-                <Text style={styles.outlineButtonText}>Go to Login</Text>
+                <Text style={styles.outlineButtonText}>
+                  Go to Login
+                </Text>
               </Pressable>
             ) : null}
           </View>
         ) : product ? (
           <View style={styles.card}>
-            {product.image_url ? (
+            {/* Product image */}
+            {imageUrl && !imageError ? (
               <Image
-                source={{ uri: product.image_url }}
+                key={`${product.id}-${imageUrl}`}
+                source={{ uri: imageUrl }}
                 style={styles.image}
                 resizeMode="contain"
+                onError={(error) => {
+                  console.error(
+                    "Staff product image failed to load:",
+                    {
+                      productId: product.id,
+                      imageUrl,
+                      error: error.nativeEvent?.error,
+                    }
+                  );
+
+                  setImageError(true);
+                }}
               />
             ) : (
               <View style={styles.noImage}>
-                <Text style={styles.helper}>No product image available</Text>
+                <Text style={styles.noImageIcon}>▧</Text>
+
+                <Text style={styles.helper}>
+                  {imageError
+                    ? "Unable to load product image"
+                    : "No product image available"}
+                </Text>
               </View>
             )}
 
+            {/* Product information */}
             <Text style={styles.name}>
               {product.name || "Unnamed product"}
             </Text>
@@ -197,12 +252,16 @@ export default function StaffProductDetailsScreen() {
               </Text>
             </View>
 
-            <Text style={styles.price}>{formatPrice(product.price)}</Text>
+            <Text style={styles.price}>
+              {formatPrice(product.price)}
+            </Text>
 
             <View style={styles.divider} />
 
             <Text style={styles.label}>Product ID</Text>
-            <Text style={styles.value}>{product.id}</Text>
+            <Text style={styles.value}>
+              {product.id}
+            </Text>
 
             <Text style={styles.label}>Category</Text>
             <Text style={styles.value}>
@@ -235,12 +294,15 @@ export default function StaffProductDetailsScreen() {
             </Text>
 
             <Text style={styles.label}>Submitted on</Text>
-            <Text style={styles.value}>{formatDate(product.created_at)}</Text>
+            <Text style={styles.value}>
+              {formatDate(product.created_at)}
+            </Text>
 
             <View style={styles.notice}>
               <Text style={styles.noticeText}>
-                Staff can inspect product information only. Approval and
-                rejection are available to authorized administrators.
+                Staff can inspect product information only.
+                Approval and rejection are available to
+                authorized administrators.
               </Text>
             </View>
           </View>
@@ -250,7 +312,9 @@ export default function StaffProductDetailsScreen() {
           style={styles.backButton}
           onPress={() => router.replace("/staff-products")}
         >
-          <Text style={styles.backButtonText}>Back to Product Review</Text>
+          <Text style={styles.backButtonText}>
+            Back to Product Review
+          </Text>
         </Pressable>
       </ScrollView>
     </>
@@ -291,6 +355,7 @@ const styles = StyleSheet.create({
   helper: {
     color: "#6b7280",
     marginTop: 8,
+    textAlign: "center",
   },
   image: {
     width: "100%",
@@ -300,12 +365,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   noImage: {
-    height: 120,
+    height: 180,
     backgroundColor: "#f3f4f6",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
+  },
+  noImageIcon: {
+    fontSize: 42,
+    color: "#9ca3af",
   },
   name: {
     fontSize: 22,

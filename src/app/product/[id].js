@@ -14,7 +14,9 @@ import {
   Image,
 } from "react-native";
 
-const API_BASE_URL = "http://192.168.100.93:3000";
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
 function getProductImageUrl(imageUrl) {
   if (!imageUrl || typeof imageUrl !== "string") {

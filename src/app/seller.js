@@ -28,8 +28,11 @@ import {
   saveSellerDeliveryOrigin,
 } from "../services/api";
 
-const API_BASE_URL = "http://192.168.100.93:3000";
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
+  
 function showMessage(title, message) {
   if (Platform.OS === "web") {
     window.alert(`${title}\n\n${message}`);
@@ -270,102 +273,149 @@ export default function SellerDashboard() {
     }
   }
 
-  async function handleCreateProduct() {
+  
+async function handleCreateProduct() {
+  setFormError("");
+
+  const trimmedName = name.trim();
+  const trimmedDescription = description.trim();
+  const parsedPrice = Number(price);
+  const parsedStock = Number(stock);
+
+  if (!trimmedName) {
+    setFormError("Please enter a product name.");
+    return;
+  }
+
+  if (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+    setFormError("Price must be a number greater than zero.");
+    return;
+  }
+
+  if (
+    !stock.trim() ||
+    !Number.isInteger(parsedStock) ||
+    parsedStock < 0
+  ) {
+    setFormError("Stock must be a whole number of zero or more.");
+    return;
+  }
+
+  if (categories.length > 0 && selectedCategory === null) {
+    setFormError("Please select a category.");
+    return;
+  }
+
+  if (!selectedImage?.uri) {
+    setFormError("Please select a product image.");
+    return;
+  }
+
+  // Determine the image format using MIME type first.
+  const allowedMimeTypes = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+
+  const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
+
+  const uriPath = selectedImage.uri
+    .split("?")[0]
+    .split("#")[0];
+
+  const uriExtension = uriPath.includes(".")
+    ? uriPath.split(".").pop().toLowerCase()
+    : "";
+
+  const fileNameExtension = selectedImage.fileName
+    ?.split(".")
+    .pop()
+    ?.toLowerCase();
+
+  const mimeType = String(selectedImage.mimeType || "").toLowerCase();
+
+  let imageExtension = allowedMimeTypes[mimeType];
+
+  if (!imageExtension && allowedExtensions.includes(uriExtension)) {
+    imageExtension = uriExtension === "jpeg" ? "jpg" : uriExtension;
+  }
+
+  if (
+    !imageExtension &&
+    allowedExtensions.includes(fileNameExtension)
+  ) {
+    imageExtension =
+      fileNameExtension === "jpeg" ? "jpg" : fileNameExtension;
+  }
+
+  if (!imageExtension) {
+    setFormError(
+      "Unsupported image format. Please choose a JPEG, PNG, or WebP image."
+    );
+    return;
+  }
+
+  if (
+    selectedImage.fileSize != null &&
+    selectedImage.fileSize > 5 * 1024 * 1024
+  ) {
+    setFormError("The product image must be 5 MB or smaller.");
+    return;
+  }
+
+  const imageMimeType =
+    imageExtension === "jpg"
+      ? "image/jpeg"
+      : `image/${imageExtension}`;
+
+  const imageFileName =
+    selectedImage.fileName ||
+    `product-${Date.now()}.${imageExtension}`;
+
+  setSavingProduct(true);
+
+  try {
+    const formData = new FormData();
+
+    formData.append("name", trimmedName);
+    formData.append("description", trimmedDescription);
+    formData.append("price", String(parsedPrice));
+    formData.append("stock", String(parsedStock));
+
+    if (selectedCategory !== null) {
+      formData.append("category_id", String(selectedCategory));
+    }
+
+    formData.append("image", {
+      uri: selectedImage.uri,
+      name: imageFileName,
+      type: imageMimeType,
+    });
+
+    await createSellerProduct(formData);
+
+    setName("");
+    setDescription("");
+    setPrice("");
+    setStock("");
+    setSelectedCategory(null);
+    setSelectedImage(null);
     setFormError("");
 
-    const trimmedName = name.trim();
-    const trimmedDescription = description.trim();
-    const parsedPrice = Number(price);
-    const parsedStock = Number(stock);
+    await loadSellerData();
 
-    if (!trimmedName) {
-      setFormError("Please enter a product name.");
-      return;
-    }
-
-    if (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      setFormError("Price must be a number greater than zero.");
-      return;
-    }
-
-    if (
-      !stock.trim() ||
-      !Number.isInteger(parsedStock) ||
-      parsedStock < 0
-    ) {
-      setFormError("Stock must be a whole number of zero or more.");
-      return;
-    }
-
-    if (categories.length > 0 && selectedCategory === null) {
-      setFormError("Please select a category.");
-      return;
-    }
-
-    let imageExtension = null;
-
-    if (selectedImage?.uri) {
-      const uriPath = selectedImage.uri.split("?")[0].split("#")[0];
-      const extension = uriPath.split(".").pop()?.toLowerCase();
-      const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
-
-      if (!allowedExtensions.includes(extension)) {
-        setFormError("Please select a JPEG, PNG, or WebP image.");
-        return;
-      }
-
-      if (
-        selectedImage.fileSize &&
-        selectedImage.fileSize > 5 * 1024 * 1024
-      ) {
-        setFormError("The product image must be 5 MB or smaller.");
-        return;
-      }
-
-      imageExtension = extension;
-    }
-
-    setSavingProduct(true);
-
-    try {
-      const formData = new FormData();
-
-      formData.append("name", trimmedName);
-      formData.append("description", trimmedDescription);
-      formData.append("price", String(parsedPrice));
-      formData.append("stock", String(parsedStock));
-
-      if (selectedCategory !== null) {
-        formData.append("category_id", String(selectedCategory));
-      }
-
-      if (selectedImage?.uri && imageExtension) {
-        const imageFile = new File(selectedImage.uri);
-        formData.append("image", imageFile);
-      }
-
-      await createSellerProduct(formData);
-
-      setName("");
-      setDescription("");
-      setPrice("");
-      setStock("");
-      setSelectedCategory(null);
-      setSelectedImage(null);
-      setFormError("");
-
-      await loadSellerData();
-
-      showMessage(
-        "Product submitted successfully!",
-        "Your product has been saved and submitted for admin approval. You can view it in My Products."
-      );
-    } catch (error) {
-      setFormError(error.message || "Could not submit the product.");
-    } finally {
-      setSavingProduct(false);
-    }
+    showMessage(
+      "Product submitted successfully!",
+      "Your product has been saved and submitted for admin approval. You can view it in My Products."
+    );
+  } catch (error) {
+    setFormError(error.message || "Could not submit the product.");
+  } finally {
+    setSavingProduct(false);
   }
+}
 
   async function processOrderDecision(order, decision) {
     setProcessingOrderId(order.id);

@@ -18,7 +18,9 @@ import { Redirect, Stack, router } from "expo-router";
 import { useAuth } from "../context/AuthContext";
 import { getToken } from "../services/auth";
 
-const API_BASE_URL = "http://192.168.100.93:3000";
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
 const ROLE_FILTERS = [
   { label: "All Users", value: "all" },
