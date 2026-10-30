@@ -223,12 +223,21 @@ export default function HomeScreen() {
     );
   }
 
-  if (!user) {
-    return <Redirect href="/login" />;
-  }
-  if (user.role === "admin") {
-    return <Redirect href="/admin" />;
-  }
+ if (!user) {
+  return <Redirect href="/login" />;
+}
+
+if (user.role === "admin") {
+  return <Redirect href="/admin" />;
+}
+
+if (user.role === "staff") {
+  return <Redirect href="/staff" />;
+}
+
+if (user.role === "seller") {
+  return <Redirect href="/seller" />;
+}
 
   return (
     <SafeAreaView style={styles.safeArea}>

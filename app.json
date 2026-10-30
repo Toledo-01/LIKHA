@@ -6,6 +6,11 @@
     "orientation": "portrait",
     "icon": "./assets/likhalocal-logo.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/likhalocal-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FAF9F5"
+    },
     "ios": {
       "supportsTablet": true
     },
