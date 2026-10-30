@@ -7,7 +7,7 @@ import { File as ExpoFile } from "expo-file-system";
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
-  "http://192.168.100.93:3000";
+  "https://likhalocal-api.onrender.com";
 
 const TOKEN_KEY = "likhalocal_auth_token";
 
