@@ -137,9 +137,54 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET is missing from your .env file.");
 }
 
+
 // =========================
 // 4. DATABASE CONNECTION
 // =========================
+
+function getDatabaseSSLConfig() {
+  if (process.env.DB_SSL !== "true") {
+    return undefined;
+  }
+
+  let caCertificate = process.env.DB_SSL_CA;
+
+  // Render: use the certificate stored in the environment variable.
+  if (caCertificate) {
+    caCertificate = caCertificate.replace(/\\n/g, "\n").trim();
+  } else {
+    // Local development: use the local certificate file.
+    const certificatePath = path.resolve(
+      __dirname,
+      process.env.DB_SSL_CA_PATH || "certs/isrgrootx1.pem"
+    );
+
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "DB_SSL_CA is missing. Add the complete TiDB CA certificate to your Render environment variables."
+      );
+    }
+
+    if (!fs.existsSync(certificatePath)) {
+      throw new Error(
+        `Database SSL certificate not found: ${certificatePath}`
+      );
+    }
+
+    caCertificate = fs.readFileSync(certificatePath, "utf8");
+  }
+
+  if (!caCertificate.includes("-----BEGIN CERTIFICATE-----")) {
+    throw new Error(
+      "DB_SSL_CA does not contain a valid PEM certificate."
+    );
+  }
+
+  return {
+    ca: caCertificate,
+    rejectUnauthorized: true,
+  };
+}
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
@@ -148,20 +193,7 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "likhalocal",
 
-  ssl: process.env.DB_SSL === "true"
-    ? {
-        ca: process.env.DB_SSL_CA
-          ? process.env.DB_SSL_CA.replace(/\\n/g, "\n")
-          : fs.readFileSync(
-              path.resolve(
-                __dirname,
-                process.env.DB_SSL_CA_PATH || "certs/isrgrootx1.pem"
-              ),
-              "utf8"
-            ),
-        rejectUnauthorized: true,
-      }
-    : undefined,
+  ssl: getDatabaseSSLConfig(),
 
   waitForConnections: true,
   connectionLimit: 10,
@@ -469,6 +501,41 @@ function allowRoles(...allowedRoles) {
 
     next();
   };
+}
+
+// =========================
+// STAFF PRODUCT NOTIFICATION HELPER
+// =========================
+
+async function notifyStaffOfPendingProduct(product) {
+  try {
+    await pool.execute(
+      `INSERT INTO staff_notifications
+        (
+          staff_user_id,
+          product_id,
+          title,
+          message,
+          is_read
+        )
+       SELECT
+          id,
+          ?,
+          ?,
+          ?,
+          0
+       FROM users
+       WHERE role = 'staff'
+         AND is_active = 1`,
+      [
+        product.id,
+        "New Product for Review",
+        `${product.name} has been submitted by a seller and is awaiting review.`,
+      ]
+    );
+  } catch (error) {
+    console.error("Notify staff of pending product error:", error);
+  }
 }
 
 const authenticateCustomer = [
