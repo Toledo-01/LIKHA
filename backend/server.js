@@ -150,12 +150,15 @@ const pool = mysql.createPool({
 
   ssl: process.env.DB_SSL === "true"
     ? {
-        ca: fs.readFileSync(
-          path.resolve(
-            __dirname,
-            process.env.DB_SSL_CA_PATH || "certs/isrgrootx1.pem"
-          )
-        ),
+        ca: process.env.DB_SSL_CA
+          ? process.env.DB_SSL_CA.replace(/\\n/g, "\n")
+          : fs.readFileSync(
+              path.resolve(
+                __dirname,
+                process.env.DB_SSL_CA_PATH || "certs/isrgrootx1.pem"
+              ),
+              "utf8"
+            ),
         rejectUnauthorized: true,
       }
     : undefined,
