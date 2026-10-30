@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 const crypto = require("crypto");
 
@@ -87,16 +86,39 @@ function uploadImageToCloudinary(buffer, folder, publicId) {
   });
 }
 
-
 // =========================
 // 1. PROFILE PICTURE STORAGE
 // =========================
 
-const allowedImageTypes = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-};
+// Accept a file if EITHER its mimetype OR its extension looks like an image.
+// This handles image/jpg vs image/jpeg, uppercase .JPG/.PNG, and
+// application/octet-stream uploads from some mobile devices.
+const allowedImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
+  "image/png",
+  "image/x-png",
+  "image/webp",
+]);
+
+const allowedImageExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+
+function imageFileFilter(req, file, callback) {
+  const mimetype = (file.mimetype || "").toLowerCase();
+  const ext = path.extname(file.originalname || "").toLowerCase();
+
+  if (
+    allowedImageMimeTypes.has(mimetype) ||
+    allowedImageExtensions.includes(ext)
+  ) {
+    return callback(null, true);
+  }
+
+  return callback(
+    new Error("Only JPEG, PNG, and WebP images are allowed.")
+  );
+}
 
 const uploadProfilePictureMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -104,15 +126,7 @@ const uploadProfilePictureMiddleware = multer({
     fileSize: 5 * 1024 * 1024,
     files: 1,
   },
-  fileFilter: (req, file, callback) => {
-    if (!allowedImageTypes[file.mimetype]) {
-      return callback(
-        new Error("Only JPEG, PNG, and WebP images are allowed.")
-      );
-    }
-
-    callback(null, true);
-  },
+  fileFilter: imageFileFilter,
 });
 
 // =========================
@@ -136,7 +150,6 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET is missing from your .env file.");
 }
-
 
 // =========================
 // 4. DATABASE CONNECTION
@@ -686,7 +699,6 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-
     if (
       typeof email !== "string" ||
       typeof password !== "string" ||
@@ -772,7 +784,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Get the currently logged-in user's profile
+// Firebase login bridge
 app.post("/api/auth/firebase-login", async (req, res) => {
   try {
     const idToken =
@@ -980,7 +992,6 @@ app.post("/api/auth/firebase-login", async (req, res) => {
   }
 });
 
-
 // Get the currently logged-in user's profile
 app.get("/api/auth/me", authenticateUser, async (req, res) => {
   try {
@@ -1019,7 +1030,6 @@ app.get("/api/auth/me", authenticateUser, async (req, res) => {
     });
   }
 });
-
 
 // Update the currently logged-in customer's profile
 app.put("/api/auth/me", authenticateUser, async (req, res) => {
@@ -1206,15 +1216,7 @@ const uploadProductImage = multer({
     fileSize: 5 * 1024 * 1024,
     files: 1,
   },
-  fileFilter: (req, file, callback) => {
-    if (!allowedImageTypes[file.mimetype]) {
-      return callback(
-        new Error("Only JPEG, PNG, and WebP images are allowed.")
-      );
-    }
-
-    callback(null, true);
-  },
+  fileFilter: imageFileFilter,
 });
 
 /* Return readable errors for product image uploads */
@@ -1235,26 +1237,6 @@ function handleProductImageUpload(req, res, next) {
     next();
   });
 }
-
-/* Return readable errors for product image uploads */
-
-function handleProductImageUpload(req, res, next) {
-  uploadProductImage.single("image")(req, res, (error) => {
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message:
-          error.code === "LIMIT_FILE_SIZE"
-            ? "Product image must be 5 MB or smaller."
-            : error.message ||
-              "Unable to upload the product image.",
-      });
-    }
-
-    next();
-  });
-}
-
 
 // =========================
 // 11. PUBLIC BROWSING ROUTES
@@ -1346,7 +1328,6 @@ app.get(
         [req.userId]
       );
 
-      
       return res.json({
         success: true,
         products,
@@ -1397,13 +1378,10 @@ app.post(
           ? null
           : Number(category_id);
 
-     
-	
-     let productImage =
-  typeof image_url === "string" && image_url.trim()
-    ? image_url.trim()
-    : null;
-
+      let productImage =
+        typeof image_url === "string" && image_url.trim()
+          ? image_url.trim()
+          : null;
 
       if (!productName || productName.length > 180) {
         return res.status(400).json({
@@ -1458,22 +1436,23 @@ app.post(
         });
       }
 
-   if (req.file) {
-  const cloudinaryResult = await uploadImageToCloudinary(
-    req.file.buffer,
-    "likhalocal/products",
-    `product-${req.userId}-${Date.now()}`
-  );
+      if (req.file) {
+        const cloudinaryResult = await uploadImageToCloudinary(
+          req.file.buffer,
+          "likhalocal/products",
+          `product-${req.userId}-${Date.now()}`
+        );
 
-  productImage = cloudinaryResult.secure_url;
-}
+        productImage = cloudinaryResult.secure_url;
+      }
 
-if (productImage && productImage.length > 500) {
-  return res.status(400).json({
-    success: false,
-    message: "Image URL must be 500 characters or fewer.",
-  });
-}
+      if (productImage && productImage.length > 500) {
+        return res.status(400).json({
+          success: false,
+          message: "Image URL must be 500 characters or fewer.",
+        });
+      }
+
       const [result] = await pool.execute(
         `INSERT INTO products
           (
@@ -1530,7 +1509,6 @@ if (productImage && productImage.length > 500) {
     }
   }
 );
-
 
 // =========================
 // 13. ADMIN PRODUCT APPROVAL
@@ -1763,8 +1741,7 @@ app.get(
 // 15. ADMIN USER MANAGEMENT
 // =========================
 
-
- // Create a user account (admin only)
+// Create a user account (admin only)
 app.post(
   "/api/admin/users",
   authenticateUser,
@@ -1880,7 +1857,6 @@ app.post(
     }
   }
 );
-
 
 // Get all registered users (admin only)
 app.get(
@@ -2168,8 +2144,8 @@ app.get(
             p.status,
             p.created_at
           FROM products p
-          LEFT JOIN users u ON p.seller_id = u.id
-          LEFT JOIN categories c ON p.category_id = c.id
+          LEFT JOIN users u ON u.id = p.seller_id
+          LEFT JOIN categories c ON c.id = p.category_id
           WHERE p.id = ?
           LIMIT 1
         `,
@@ -2203,7 +2179,6 @@ app.get(
 // 16. ROLE-PROTECTED TEST ROUTES
 // =========================
 
-// Admin-only
 app.get(
   "/api/admin/test",
   authenticateUser,
@@ -2217,7 +2192,6 @@ app.get(
   }
 );
 
-// Seller-only
 app.get(
   "/api/seller/test",
   authenticateUser,
@@ -2231,7 +2205,6 @@ app.get(
   }
 );
 
-// Staff-only
 app.get(
   "/api/staff/test",
   authenticateUser,
@@ -2245,7 +2218,6 @@ app.get(
   }
 );
 
-// Customer-only
 app.get(
   "/api/customer/test",
   authenticateUser,
@@ -2259,12 +2231,10 @@ app.get(
   }
 );
 
-
 /* =========================
    SELLER DELIVERY FEE
 ========================= */
 
-// Get the logged-in seller's delivery fee.
 app.get(
   "/api/seller/delivery-fee",
   authenticateUser,
@@ -2301,7 +2271,6 @@ app.get(
   }
 );
 
-// Update the logged-in seller's delivery fee.
 app.put(
   "/api/seller/delivery-fee",
   authenticateUser,
@@ -2363,12 +2332,10 @@ app.put(
   }
 );
 
-
 /* =========================
    SELLER DELIVERY ORIGIN
 ========================= */
 
-// Get the logged-in seller's delivery origin.
 app.get(
   "/api/seller/delivery-origin",
   authenticateUser,
@@ -2410,7 +2377,6 @@ app.get(
   }
 );
 
-// Save the logged-in seller's delivery origin.
 app.put(
   "/api/seller/delivery-origin",
   authenticateUser,
@@ -2487,7 +2453,6 @@ app.put(
     }
   }
 );
-
 
 /* =========================
    CUSTOMER ORDER CHECKOUT
@@ -2633,10 +2598,7 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
         throw new Error("A product has an invalid price.");
       }
 
-      if (
-        !Number.isFinite(deliveryFee) ||
-        deliveryFee < 0
-      ) {
+      if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
         throw new Error(
           "A seller has an invalid delivery fee. Please contact support."
         );
@@ -2667,9 +2629,7 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
         .toFixed(2)
     );
 
-    const totalAmount = Number(
-      (subtotal + deliveryFee).toFixed(2)
-    );
+    const totalAmount = Number((subtotal + deliveryFee).toFixed(2));
 
     // Payment remains unpaid until confirmed by a real payment process.
     const paymentStatus = "unpaid";
@@ -2760,10 +2720,9 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
 
     return res.status(error.statusCode || 500).json({
       success: false,
-      message:
-        error.statusCode
-          ? error.message
-          : "Unable to place your order. Please try again.",
+      message: error.statusCode
+        ? error.message
+        : "Unable to place your order. Please try again.",
     });
   } finally {
     if (connection) {
@@ -2772,10 +2731,9 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
   }
 });
 
-
- // =========================
- // SELLER ORDER MANAGEMENT
- // =========================
+// =========================
+// SELLER ORDER MANAGEMENT
+// =========================
 
 // Get orders containing products owned by the logged-in seller
 app.get(
@@ -2974,7 +2932,6 @@ app.patch(
     }
   }
 );
-
 
 // =========================
 // 17. START THE SERVER
