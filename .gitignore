@@ -39,3 +39,49 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Backend environment secrets
+/backend/.env
+/backend/.env.*
+!/backend/.env.example
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+
+# Local backend uploads (migrate to cloud storage separately)
+/backend/uploads/
+
+# Firebase Admin service-account credentials
+/backend/*service-account*.json
+/backend/*firebase-adminsdk*.json
+
+# Local backups and database migration files
+/backup-notifications-*/
+/database-migration/
+/firebase-migration-backup-*/
+/migration-backup/
+/likhalocal-migration.sql
+
+# Backend certificates
+/backend/certs/
+
+# Local backup files
+*.backup
+*.backup-*
+*.before-fix.js
+*.local-backup
+*.shipping-backup
+/server - Copy.js
+/backend/server - Copy.js
+
+# Copied backend dependencies
+/backend/node_modules/
+/backend/node_modules - Copy/
+
+# Local database backups
+/backend/database-backups/
+
+# Local database backups
+/backend/database-backups/
