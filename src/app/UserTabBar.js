@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "../context/CartContext";
 
 const tabs = [
@@ -19,9 +20,15 @@ const tabs = [
 export default function UserTabBar() {
   const pathname = usePathname();
   const { cartCount } = useCart();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.bottomNav}>
+    <View
+      style={[
+        styles.bottomNav,
+        { paddingBottom: Math.max(insets.bottom, 8) },
+      ]}
+    >
       {tabs.map((tab) => {
         const active =
           tab.route === "/"
@@ -73,10 +80,6 @@ export default function UserTabBar() {
 
 const styles = StyleSheet.create({
   bottomNav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
     minHeight: 64,
     flexDirection: "row",
     justifyContent: "space-around",
@@ -86,7 +89,6 @@ const styles = StyleSheet.create({
     borderTopColor: "#EAEAE2",
     paddingTop: 8,
     paddingBottom: 8,
-    zIndex: 100,
     elevation: 10,
   },
   navItem: {

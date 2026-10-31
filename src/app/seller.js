@@ -498,7 +498,15 @@ async function handleCreateProduct() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.brand}>LikhaLocal</Text>
+        <View style={styles.brandRow}>
+          <Image
+            source={require("../../assets/likhalocal-logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="LikhaLocal logo"
+          />
+          <Text style={styles.brand}>LikhaLocal</Text>
+        </View>
         <Text style={styles.heading}>Seller Dashboard</Text>
         <Text style={styles.subtitle}>
           Welcome, {user.full_name}!
@@ -1190,6 +1198,15 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 36,
     gap: 16,
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  logo: {
+    width: 48,
+    height: 48,
   },
   brand: {
     color: "#245B43",

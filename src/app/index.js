@@ -64,7 +64,6 @@ export default function HomeScreen() {
   const [apiError, setApiError] = useState("");
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [activeTab, setActiveTab] = useState("Home");
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
 
@@ -527,47 +526,6 @@ if (user.role === "seller") {
             Products shown are retrieved from the LikhaLocal database.
           </Text>
         </ScrollView>
-
-        <View style={styles.bottomNav}>
-          {[
-            { name: "Home", icon: "⌂" },
-            { name: "Explore", icon: "⌕" },
-            { name: "Cart", icon: "🛍️" },
-            { name: "Favorites", icon: "♡" },
-            { name: "Profile", icon: "♙" },
-          ].map((tab) => {
-            const active = activeTab === tab.name;
-
-            return (
-              <TouchableOpacity
-                key={tab.name}
-                style={styles.navItem}
-                onPress={() => {
-                  setActiveTab(tab.name);
-
-                  if (tab.name === "Cart") {
-                    router.push("/cart");
-                  } else if (tab.name === "Home") {
-                    router.replace("/");
-                  } else if (tab.name === "Explore") {
-                    router.push("/explore");
-                  } else if (tab.name === "Profile") {
-                    router.push("/profile");
-                  } else if (tab.name === "Favorites") {
-                    router.push("/favorites");
-                  }
-                }}
-              >
-                <Text style={[styles.navIcon, active && styles.navActive]}>
-                  {tab.icon}
-                </Text>
-                <Text style={[styles.navLabel, active && styles.navActive]}>
-                  {tab.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -578,7 +536,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#FAF9F5" },
   authLoading: { flex: 1, alignItems: "center", justifyContent: "center" },
   authLoadingText: { marginTop: 12, fontSize: 14, color: "#54745B" },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 110 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 36 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -835,25 +793,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 18,
   },
-  bottomNav: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderTopWidth: 1,
-    borderTopColor: "#EAEAE2",
-    paddingTop: 10,
-    paddingBottom: 12,
-  },
-  navItem: {
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 60,
-    gap: 3,
-  },
-  navIcon: { fontSize: 23, color: "#9AA398" },
-  navLabel: { fontSize: 10, color: "#9AA398", fontWeight: "600" },
-  navActive: { color: "#245B43", fontWeight: "900" },
   cartBadge: {
     position: "absolute",
     top: -5,

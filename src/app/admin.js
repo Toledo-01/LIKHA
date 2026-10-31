@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -146,9 +147,17 @@ export default function AdminDashboardScreen() {
         }
       >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>LikhaLocal</Text>
-            <Text style={styles.subtitle}>ADMINISTRATION</Text>
+          <View style={styles.brandRow}>
+            <Image
+              source={require("../../assets/likhalocal-logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityLabel="LikhaLocal logo"
+            />
+            <View>
+              <Text style={styles.brand}>LikhaLocal</Text>
+              <Text style={styles.subtitle}>ADMINISTRATION</Text>
+            </View>
           </View>
 
           <TouchableOpacity
@@ -358,6 +367,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 28,
   },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  logo: {
+    width: 48,
+    height: 48,
+  },
   brand: {
     color: "#245B43",
     fontSize: 25,
@@ -529,6 +547,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-
 
 

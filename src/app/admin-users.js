@@ -499,6 +499,18 @@ export default function AdminUsersScreen() {
           />
         }
       >
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace("/admin")}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Admin Dashboard"
+        >
+          <Text style={styles.backButtonText}>
+            ‹ Back to Admin Dashboard
+          </Text>
+        </TouchableOpacity>
+
         {/* Page heading */}
         <View style={styles.header}>
           <Text style={styles.eyebrow}>
@@ -931,16 +943,6 @@ export default function AdminUsersScreen() {
           </View>
         )}
 
-        {/* Return to admin dashboard */}
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.replace("/admin")}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.backButtonText}>
-            Back to Admin Dashboard
-          </Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1370,15 +1372,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   backButton: {
-    backgroundColor: "#172B20",
-    borderRadius: 12,
-    padding: 15,
-    alignItems: "center",
-    marginTop: 26,
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    marginBottom: 8,
   },
   backButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
+    color: "#245B43",
+    fontSize: 15,
     fontWeight: "800",
   },
 });

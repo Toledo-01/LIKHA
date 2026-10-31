@@ -171,6 +171,17 @@ export default function StaffProductDetailsScreen() {
           />
         }
       >
+        <Pressable
+          style={styles.backButton}
+          onPress={() => router.replace("/staff-products")}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Product Review"
+        >
+          <Text style={styles.backButtonText}>
+            ‹ Back to Product Review
+          </Text>
+        </Pressable>
+
         <Text style={styles.heading}>Product Inspection</Text>
 
         <Text style={styles.subtitle}>
@@ -308,14 +319,6 @@ export default function StaffProductDetailsScreen() {
           </View>
         ) : null}
 
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.replace("/staff-products")}
-        >
-          <Text style={styles.backButtonText}>
-            Back to Product Review
-          </Text>
-        </Pressable>
       </ScrollView>
     </>
   );
@@ -458,12 +461,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   backButton: {
-    marginTop: 18,
-    padding: 14,
-    alignItems: "center",
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    marginBottom: 8,
   },
   backButtonText: {
     color: "#166534",
+    fontSize: 15,
     fontWeight: "700",
   },
 });

@@ -1,10 +1,10 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,17 +13,33 @@ import {
   View,
   Platform,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginScreen() {
   const { login } = useAuth();
 
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   async function handleLogin() {
     setError("");
@@ -63,11 +79,17 @@ if (role === "admin") {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboard}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.scrollContent,
+            keyboardVisible && styles.scrollContentKeyboard,
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
         >
           <TouchableOpacity
             style={styles.backButton}
@@ -76,20 +98,34 @@ if (role === "admin") {
           >
           </TouchableOpacity>
 
-          <View style={styles.header}>
-            <Image
-              source={require("../../assets/likhalocal-logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-              accessibilityLabel="LikhaLocal logo"
-            />
+          <View
+            style={[
+              styles.header,
+              keyboardVisible && styles.headerKeyboard,
+            ]}
+          >
+            {!keyboardVisible && (
+              <Image
+                source={require("../../assets/likhalocal-logo.png")}
+                style={styles.logo}
+                resizeMode="contain"
+                accessibilityLabel="LikhaLocal logo"
+              />
+            )}
             <Text style={styles.brand}>LikhaLocal</Text>
-            <Text style={styles.tagline}>
-              Discover the unique talents of Filipino creators.
-            </Text>
+            {!keyboardVisible && (
+              <Text style={styles.tagline}>
+                Discover the unique talents of Filipino creators.
+              </Text>
+            )}
           </View>
 
-          <View style={styles.card}>
+          <View
+            style={[
+              styles.card,
+              keyboardVisible && styles.cardKeyboard,
+            ]}
+          >
             <Text style={styles.title}>Welcome back!</Text>
             <Text style={styles.subtitle}>
               Explore the creativity of the Filipinos.
@@ -154,7 +190,7 @@ if (role === "admin") {
 
             <View style={styles.footer}>
               <Text style={styles.footerText}>
-                Don't have an account?{" "}
+                Don&apos;t have an account?{" "}
               </Text>
               <TouchableOpacity
                 onPress={() => router.push("/register")}
@@ -165,9 +201,11 @@ if (role === "admin") {
             </View>
           </View>
 
-          <Text style={styles.bottomNote}>
-            Supporting local makers, one purchase at a time.
-          </Text>
+          {!keyboardVisible && (
+            <Text style={styles.bottomNote}>
+              Supporting local makers, one purchase at a time.
+            </Text>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -182,6 +220,9 @@ const styles = StyleSheet.create({
   keyboard: {
     flex: 1,
   },
+  scrollView: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 22,
@@ -189,6 +230,11 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  scrollContentKeyboard: {
+    justifyContent: "flex-start",
+    paddingTop: 4,
+    paddingBottom: 16,
   },
   backButton: {
     alignSelf: "flex-start",
@@ -203,12 +249,16 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     marginTop: 12,
-    marginBottom: 28,
+    marginBottom: 24,
+  },
+  headerKeyboard: {
+    marginTop: 0,
+    marginBottom: 8,
   },
   logo: {
-    width: 64,
-    height: 64,
-    marginBottom: 9,
+    width: 88,
+    height: 88,
+    marginBottom: 8,
   },
   brand: {
     color: "#294D37",
@@ -229,6 +279,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "#E9E5D9",
+  },
+  cardKeyboard: {
+    padding: 18,
   },
   title: {
     color: "#294D37",

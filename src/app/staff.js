@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -140,7 +141,15 @@ export default function StaffScreen() {
       }
     >
       <View style={styles.header}>
-        <Text style={styles.brand}>LikhaLocal</Text>
+        <View style={styles.brandRow}>
+          <Image
+            source={require("../../assets/likhalocal-logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="LikhaLocal logo"
+          />
+          <Text style={styles.brand}>LikhaLocal</Text>
+        </View>
         <Text style={styles.heading}>Staff Dashboard</Text>
         <Text style={styles.subtitle}>
           Your workspace for reviewing and exploring local products.
@@ -327,12 +336,21 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 22,
   },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 7,
+  },
+  logo: {
+    width: 48,
+    height: 48,
+  },
   brand: {
     color: "#166534",
     fontSize: 14,
     fontWeight: "800",
     letterSpacing: 1.5,
-    marginBottom: 7,
   },
   heading: {
     fontSize: 28,
@@ -643,6 +661,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-
 
 

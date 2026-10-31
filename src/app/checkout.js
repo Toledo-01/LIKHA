@@ -251,6 +251,16 @@ export default function CheckoutScreen() {
         style={styles.screen}
         contentContainerStyle={styles.confirmationContainer}
       >
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace("/")}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Home"
+        >
+          <Text style={styles.backButtonText}>‹ Back to Home</Text>
+        </TouchableOpacity>
+
         <View style={styles.successIcon}>
           <Text style={styles.successIconText}>✓</Text>
         </View>
@@ -337,17 +347,6 @@ export default function CheckoutScreen() {
           </View>
         )}
 
-        {/* New Back to Home button */}
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => router.replace("/")}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.secondaryButtonText}>
-            Back to Home
-          </Text>
-        </TouchableOpacity>
-
         {/* Continue Shopping button */}
         <TouchableOpacity
           style={styles.primaryButton}
@@ -369,6 +368,17 @@ export default function CheckoutScreen() {
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
     >
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => router.back()}
+        disabled={isSubmitting}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+      >
+        <Text style={styles.backButtonText}>‹ Go Back</Text>
+      </TouchableOpacity>
+
       <Text style={styles.pageTitle}>Checkout</Text>
 
       <Text style={styles.pageSubtitle}>
@@ -617,16 +627,6 @@ export default function CheckoutScreen() {
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => router.back()}
-        disabled={isSubmitting}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.secondaryButtonText}>
-          Go Back
-        </Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -693,6 +693,18 @@ const styles = StyleSheet.create({
     color: "#666666",
     lineHeight: 21,
     marginBottom: 18,
+  },
+  backButton: {
+    alignSelf: "flex-start",
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  backButtonText: {
+    color: "#246B45",
+    fontSize: 15,
+    fontWeight: "700",
   },
   card: {
     backgroundColor: "#FFFFFF",

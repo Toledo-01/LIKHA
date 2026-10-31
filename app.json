@@ -6,15 +6,11 @@
     "orientation": "portrait",
     "icon": "./assets/likhalocal-logo.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/likhalocal-logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FAF9F5"
-    },
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FAF9F5",
         "foregroundImage": "./assets/likhalocal-logo.png"
@@ -27,7 +23,19 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAF9F5",
+          "image": "./assets/likhalocal-logo.png",
+          "imageWidth": 200,
+          "android": {
+            "backgroundColor": "#FAF9F5",
+            "image": "./assets/likhalocal-logo.png",
+            "imageWidth": 200
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {},

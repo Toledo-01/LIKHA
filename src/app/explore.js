@@ -378,39 +378,6 @@ export default function ExploreScreen() {
           </Text>
         </View>
       </ScrollView>
-
-      {!isStaffBrowsing && (
-        <View style={styles.bottomNav}>
-          {[
-            { name: "Home", route: "/" },
-            { name: "Explore", route: "/explore" },
-            { name: "Cart", route: "/cart" },
-            { name: "Favorites", route: "/favorites" },
-            { name: "Profile", route: "/profile" },
-          ].map((tab) => {
-            const active = tab.name === "Explore";
-
-            return (
-              <TouchableOpacity
-                key={tab.name}
-                style={styles.navItem}
-                onPress={() => {
-                  if (!active) router.push(tab.route);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.navLabel,
-                    active && styles.navActive,
-                  ]}
-                >
-                  {tab.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -673,27 +640,5 @@ const styles = StyleSheet.create({
     color: "#31513B",
     fontWeight: "900",
     fontSize: 13,
-  },
-  bottomNav: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderTopWidth: 1,
-    borderTopColor: "#EAEAE2",
-    paddingVertical: 15,
-  },
-  navItem: {
-    alignItems: "center",
-    paddingHorizontal: 4,
-  },
-  navLabel: {
-    color: "#9AA398",
-    fontSize: 10,
-    fontWeight: "600",
-  },
-  navActive: {
-    color: "#245B43",
-    fontWeight: "900",
   },
 });
