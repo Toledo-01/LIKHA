@@ -388,11 +388,24 @@ async function handleCreateProduct() {
       formData.append("category_id", String(selectedCategory));
     }
 
-    formData.append("image", {
-      uri: selectedImage.uri,
-      name: imageFileName,
-      type: imageMimeType,
-    });
+    if (Platform.OS === "web") {
+      let imageFile = selectedImage.file;
+
+      if (!imageFile) {
+        const imageResponse = await fetch(selectedImage.uri);
+
+        if (!imageResponse.ok) {
+          throw new Error("Could not read the selected product image.");
+        }
+
+        const imageBlob = await imageResponse.blob();
+        imageFile = new Blob([imageBlob], { type: imageMimeType });
+      }
+
+      formData.append("image", imageFile, imageFileName);
+    } else {
+      formData.append("image", new File(selectedImage.uri));
+    }
 
     await createSellerProduct(formData);
 

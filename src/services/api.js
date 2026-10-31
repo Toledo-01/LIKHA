@@ -1,5 +1,6 @@
 
 import { getToken } from "./auth";
+import { fetch as expoFetch } from "expo/fetch";
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -93,7 +94,8 @@ export async function createSellerProduct(product) {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(
+  const request = isFormData ? expoFetch : fetch;
+  const response = await request(
     `${API_BASE_URL}/api/seller/products`,
     {
       method: "POST",
