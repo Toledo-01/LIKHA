@@ -324,6 +324,14 @@ export default function ProductDetailsScreen() {
           {product.price.toLocaleString("en-PH")}
         </Text>
 
+        <Text style={styles.shippingFee}>
+          Shipping: ₱{Number(product.shipping_fee || 0).toLocaleString(
+            "en-PH",
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+          )}{" "}
+          (fixed fee; may be shared across this seller&apos;s items)
+        </Text>
+
         <Text
           style={[
             styles.stock,
@@ -481,6 +489,12 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#245B43",
     marginTop: 18,
+  },
+  shippingFee: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#657366",
+    marginTop: 5,
   },
   stock: {
     fontSize: 12,

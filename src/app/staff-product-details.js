@@ -267,6 +267,11 @@ export default function StaffProductDetailsScreen() {
               {formatPrice(product.price)}
             </Text>
 
+            <Text style={styles.label}>Shipping fee</Text>
+            <Text style={styles.value}>
+              {formatPrice(product.shipping_fee)}
+            </Text>
+
             <View style={styles.divider} />
 
             <Text style={styles.label}>Product ID</Text>

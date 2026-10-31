@@ -132,6 +132,23 @@ export default function CheckoutScreen() {
     );
   }, 0);
 
+  const deliveryFeeEstimate = [
+    ...checkoutItems
+      .reduce((fees, item) => {
+        const sellerKey = String(
+          item.seller_id ?? item.sellerId ?? `product-${item.id}`
+        );
+        const fee = Number(item.shipping_fee || 0);
+
+        fees.set(
+          sellerKey,
+          Math.max(fees.get(sellerKey) || 0, fee)
+        );
+        return fees;
+      }, new Map())
+      .values(),
+  ].reduce((total, fee) => total + fee, 0);
+
   const selectedPaymentDetails =
     paymentMethod === "COD"
       ? null
@@ -606,12 +623,13 @@ export default function CheckoutScreen() {
 
         <SummaryRow
           label="Delivery Fee"
-          value="Calculated by server"
+          value={formatCurrency(deliveryFeeEstimate)}
         />
 
         <Text style={styles.helperText}>
-          The final delivery fee and order total will be calculated
-          by the server when you place your order.
+          Estimated shipping uses the highest product fee once per seller.
+          Sellers set a fixed fee, so it does not vary by delivery location.
+          The server confirms the final fee when you place the order.
         </Text>
       </View>
 

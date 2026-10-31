@@ -106,6 +106,7 @@ export default function SellerDashboard() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [shippingFee, setShippingFee] = useState("0");
   const [stock, setStock] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
 
@@ -283,6 +284,7 @@ async function handleCreateProduct() {
   const trimmedName = name.trim();
   const trimmedDescription = description.trim();
   const parsedPrice = Number(price);
+  const parsedShippingFee = Number(shippingFee);
   const parsedStock = Number(stock);
 
   if (!trimmedName) {
@@ -292,6 +294,16 @@ async function handleCreateProduct() {
 
   if (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice <= 0) {
     setFormError("Price must be a number greater than zero.");
+    return;
+  }
+
+  if (
+    !shippingFee.trim() ||
+    !Number.isFinite(parsedShippingFee) ||
+    parsedShippingFee < 0 ||
+    parsedShippingFee > 99999999.99
+  ) {
+    setFormError("Shipping fee must be a valid amount of zero or more.");
     return;
   }
 
@@ -385,6 +397,7 @@ async function handleCreateProduct() {
     formData.append("name", trimmedName);
     formData.append("description", trimmedDescription);
     formData.append("price", String(parsedPrice));
+    formData.append("shipping_fee", String(parsedShippingFee));
     formData.append("stock", String(parsedStock));
 
     if (selectedCategory !== null) {
@@ -415,6 +428,7 @@ async function handleCreateProduct() {
     setName("");
     setDescription("");
     setPrice("");
+    setShippingFee("0");
     setStock("");
     setSelectedCategory(null);
     setSelectedImage(null);
@@ -817,6 +831,21 @@ async function handleCreateProduct() {
                 editable={!savingProduct}
               />
 
+              <Text style={styles.label}>Shipping fee (₱) *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 50.00"
+                value={shippingFee}
+                onChangeText={setShippingFee}
+                keyboardType="decimal-pad"
+                editable={!savingProduct}
+              />
+              <Text style={styles.note}>
+                This is a fixed fee for this product and does not change by
+                customer location. If an order has multiple products from you,
+                checkout charges only the highest product shipping fee once.
+              </Text>
+
               <Text style={styles.label}>Stock quantity *</Text>
               <TextInput
                 style={styles.input}
@@ -949,6 +978,9 @@ async function handleCreateProduct() {
                       </Text>
                       <Text style={styles.productDetail}>
                         Price: {formatMoney(product.price)}
+                      </Text>
+                      <Text style={styles.productDetail}>
+                        Shipping fee: {formatMoney(product.shipping_fee)}
                       </Text>
                       <Text style={styles.productDetail}>
                         Stock: {product.stock}

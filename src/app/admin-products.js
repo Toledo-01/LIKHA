@@ -399,6 +399,14 @@ export default function AdminProductsScreen() {
           </Text>
 
           <Text style={styles.detail}>
+            Shipping fee: ₱
+            {Number(item.shipping_fee || 0).toLocaleString("en-PH", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </Text>
+
+          <Text style={styles.detail}>
             Seller: {item.seller_name || "Unknown"}
           </Text>
 

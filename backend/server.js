@@ -606,8 +606,8 @@ app.get("/api/activity/me", authenticateUser, async (req, res) => {
        FROM user_activity
        WHERE user_id = ?
        ORDER BY created_at DESC, id DESC
-       LIMIT ?`,
-      [req.userId, requestedLimit]
+       LIMIT ${requestedLimit}`,
+      [req.userId]
     );
 
     return res.json({
@@ -1385,9 +1385,11 @@ app.get("/api/products", async (req, res) => {
     const [products] = await pool.execute(
       `SELECT
         p.id,
+        p.seller_id,
         p.name,
         p.description,
         p.price,
+        p.shipping_fee,
         p.stock,
         p.image_url,
         p.status,
@@ -1431,6 +1433,7 @@ app.get(
            p.name,
            p.description,
            p.price,
+           p.shipping_fee,
            p.stock,
            p.image_url,
            p.status,
@@ -1471,6 +1474,7 @@ app.post(
         name,
         description,
         price,
+        shipping_fee,
         stock,
         category_id,
         image_url,
@@ -1485,6 +1489,7 @@ app.post(
           : "";
 
       const productPrice = Number(price);
+      const productShippingFee = Number(shipping_fee);
       const productStock = Number(stock);
 
       const categoryId =
@@ -1518,6 +1523,20 @@ app.post(
         return res.status(400).json({
           success: false,
           message: "Enter a valid product price greater than zero.",
+        });
+      }
+
+      if (
+        shipping_fee === "" ||
+        shipping_fee === null ||
+        shipping_fee === undefined ||
+        !Number.isFinite(productShippingFee) ||
+        productShippingFee < 0 ||
+        productShippingFee > 99999999.99
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Enter a valid shipping fee of zero or more.",
         });
       }
 
@@ -1577,17 +1596,19 @@ app.post(
             name,
             description,
             price,
+            shipping_fee,
             stock,
             image_url,
             status
           )
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           req.userId,
           categoryId,
           productName,
           productDescription || null,
           productPrice,
+          productShippingFee,
           productStock,
           productImage,
         ]
@@ -1617,6 +1638,7 @@ app.post(
           name: productName,
           description: productDescription || null,
           price: productPrice,
+          shipping_fee: productShippingFee,
           stock: productStock,
           image_url: productImage,
           status: "pending",
@@ -1674,6 +1696,7 @@ app.get(
           p.name,
           p.description,
           p.price,
+          p.shipping_fee,
           p.stock,
           p.image_url,
           p.status,
@@ -2325,6 +2348,7 @@ app.get(
           p.name,
           p.description,
           p.price,
+          p.shipping_fee,
           p.stock,
           p.image_url,
           p.status,
@@ -2389,6 +2413,7 @@ app.get(
             p.name,
             p.description,
             p.price,
+            p.shipping_fee,
             p.stock,
             p.image_url,
             p.status,
@@ -2825,10 +2850,10 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
            p.id,
            p.name,
            p.price,
+           p.shipping_fee,
            p.stock,
            p.status,
-           p.seller_id,
-           u.delivery_fee
+           p.seller_id
          FROM products p
          INNER JOIN users u ON u.id = p.seller_id
          WHERE p.id = ?
@@ -2863,26 +2888,30 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
       }
 
       const unitPrice = Number(product.price);
-      const deliveryFee = Number(product.delivery_fee);
+      const productShippingFee = Number(product.shipping_fee);
 
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
         throw new Error("A product has an invalid price.");
       }
 
-      if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+      if (
+        !Number.isFinite(productShippingFee) ||
+        productShippingFee < 0
+      ) {
         throw new Error(
-          "A seller has an invalid delivery fee. Please contact support."
+          `The shipping fee for ${product.name} is invalid. Please contact support.`
         );
       }
 
       subtotal += unitPrice * quantity;
 
-      // Charge each seller's fee only once per order.
+      // Charge once per seller, using the highest fee among their products.
       const sellerId = Number(product.seller_id);
 
-      if (!sellerFees.has(sellerId)) {
-        sellerFees.set(sellerId, deliveryFee);
-      }
+      sellerFees.set(
+        sellerId,
+        Math.max(sellerFees.get(sellerId) || 0, productShippingFee)
+      );
 
       orderItems.push({
         productId: product.id,
