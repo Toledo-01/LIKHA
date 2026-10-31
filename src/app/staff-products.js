@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { getToken } from "../services/auth";
 
 export const API_BASE_URL =
@@ -112,15 +112,17 @@ export default function StaffProductsScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    async function initialLoad() {
-      setLoading(true);
-      await loadProducts();
-      setLoading(false);
-    }
+  useFocusEffect(
+    useCallback(() => {
+      async function refreshOnFocus() {
+        setLoading(true);
+        await loadProducts();
+        setLoading(false);
+      }
 
-    initialLoad();
-  }, [loadProducts]);
+      refreshOnFocus();
+    }, [loadProducts])
+  );
 
   const sellers = useMemo(() => {
     const grouped = new Map();

@@ -13,6 +13,7 @@ const tabRoutes = [
   "/cart",
   "/favorites",
   "/profile",
+  "/orders",
 ];
 
 export default function RootLayout() {

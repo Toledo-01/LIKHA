@@ -24,6 +24,8 @@ import {
   createSellerProduct,
   fetchSellerOrders,
   decideSellerOrder,
+  markSellerOrderShipped,
+  respondToReturnRequest,
   fetchSellerDeliveryOrigin,
   saveSellerDeliveryOrigin,
 } from "../services/api";
@@ -93,6 +95,7 @@ export default function SellerDashboard() {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [savingProduct, setSavingProduct] = useState(false);
   const [processingOrderId, setProcessingOrderId] = useState(null);
+  const [shipmentDetails, setShipmentDetails] = useState({});
 
   const [pageError, setPageError] = useState("");
   const [orderError, setOrderError] = useState("");
@@ -421,7 +424,7 @@ async function handleCreateProduct() {
 
     showMessage(
       "Product submitted successfully!",
-      "Your product has been saved and submitted for admin approval. You can view it in My Products."
+      "Your product was submitted for staff review. Staff can inspect it, and an administrator makes the final approval decision."
     );
   } catch (error) {
     setFormError(error.message || "Could not submit the product.");
@@ -451,6 +454,47 @@ async function handleCreateProduct() {
       );
     } finally {
       setProcessingOrderId(null);
+    }
+  }
+
+  async function handleMarkShipped(order) {
+    const shipment = shipmentDetails[order.id] || {};
+    setProcessingOrderId(order.id);
+
+    try {
+      await markSellerOrderShipped(order.id, {
+        carrier: shipment.carrier || "",
+        trackingNumber: shipment.trackingNumber || "",
+      });
+      await loadSellerOrders();
+      setShipmentDetails((current) => ({
+        ...current,
+        [order.id]: { carrier: "", trackingNumber: "" },
+      }));
+      showMessage("Shipment updated", `Order #${order.id} is marked as shipped.`);
+    } catch (error) {
+      showMessage(
+        "Unable to update shipment",
+        error.message || "Please try again."
+      );
+    } finally {
+      setProcessingOrderId(null);
+    }
+  }
+
+  async function handleReturnDecision(returnRequest, decision) {
+    try {
+      await respondToReturnRequest(returnRequest.id, decision, "");
+      await loadSellerOrders();
+      showMessage(
+        "Return request updated",
+        `The return request was ${decision}.`
+      );
+    } catch (error) {
+      showMessage(
+        "Unable to update return",
+        error.message || "Please try again."
+      );
     }
   }
 
@@ -1082,6 +1126,50 @@ async function handleCreateProduct() {
                             <Text style={styles.orderDetail}>
                               Unit price: {formatMoney(item.unitPrice)}
                             </Text>
+
+                            {item.returnRequest ? (
+                              <View style={styles.returnRequestBox}>
+                                <Text style={styles.orderSectionLabel}>
+                                  RETURN REQUEST · {item.returnRequest.status}
+                                </Text>
+                                <Text style={styles.orderDetail}>
+                                  {item.returnRequest.reason}
+                                  {item.returnRequest.details
+                                    ? ` — ${item.returnRequest.details}`
+                                    : ""}
+                                </Text>
+                                {item.returnRequest.status === "requested" ? (
+                                  <View style={styles.orderActionRow}>
+                                    <TouchableOpacity
+                                      style={styles.orderApproveButton}
+                                      onPress={() =>
+                                        handleReturnDecision(
+                                          item.returnRequest,
+                                          "approved"
+                                        )
+                                      }
+                                    >
+                                      <Text style={styles.buttonText}>
+                                        Approve Return
+                                      </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                      style={styles.orderRejectButton}
+                                      onPress={() =>
+                                        handleReturnDecision(
+                                          item.returnRequest,
+                                          "rejected"
+                                        )
+                                      }
+                                    >
+                                      <Text style={styles.buttonText}>
+                                        Reject Return
+                                      </Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                ) : null}
+                              </View>
+                            ) : null}
                           </View>
                         ))
                       )}
@@ -1109,6 +1197,93 @@ async function handleCreateProduct() {
                       <Text style={styles.orderOverallStatus}>
                         Overall order status: {order.orderStatus || "pending"}
                       </Text>
+
+                      <TouchableOpacity
+                        style={styles.messageCustomerButton}
+                        onPress={() =>
+                          router.push({
+                            pathname: "/order-chat",
+                            params: {
+                              orderId: String(order.id),
+                              sellerId: String(user.id),
+                              otherName: order.customerName || "Customer",
+                            },
+                          })
+                        }
+                      >
+                        <Text style={styles.messageCustomerText}>
+                          Message {order.customerName || "customer"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {(status === "confirmed" || status === "processing") && (
+                        <View style={styles.shipmentForm}>
+                          <Text style={styles.orderSectionLabel}>
+                            SHIPMENT TRACKING
+                          </Text>
+                          {order.trackingNumber ? (
+                            <Text style={styles.orderDetail}>
+                              Current: {order.trackingCarrier} ·{" "}
+                              {order.trackingNumber}
+                            </Text>
+                          ) : null}
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Carrier (e.g. LBC)"
+                            value={shipmentDetails[order.id]?.carrier || ""}
+                            onChangeText={(value) =>
+                              setShipmentDetails((current) => ({
+                                ...current,
+                                [order.id]: {
+                                  ...current[order.id],
+                                  carrier: value,
+                                },
+                              }))
+                            }
+                            editable={!isProcessing}
+                          />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Tracking number"
+                            value={
+                              shipmentDetails[order.id]?.trackingNumber || ""
+                            }
+                            onChangeText={(value) =>
+                              setShipmentDetails((current) => ({
+                                ...current,
+                                [order.id]: {
+                                  ...current[order.id],
+                                  trackingNumber: value,
+                                },
+                              }))
+                            }
+                            editable={!isProcessing}
+                          />
+                          <TouchableOpacity
+                            style={[
+                              styles.orderApproveButton,
+                              isProcessing && styles.disabledButton,
+                            ]}
+                            onPress={() => handleMarkShipped(order)}
+                            disabled={isProcessing || loadingOrders}
+                          >
+                            {isProcessing ? (
+                              <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                              <Text style={styles.buttonText}>
+                                Mark as Shipped
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {status === "shipped" || status === "delivered" ? (
+                        <Text style={styles.orderDetail}>
+                          Tracking: {order.trackingCarrier || "Carrier"} ·{" "}
+                          {order.trackingNumber || "Not provided"}
+                        </Text>
+                      ) : null}
 
                       {isPending ? (
                         <View style={styles.orderActionRow}>
@@ -1679,6 +1854,32 @@ const styles = StyleSheet.create({
     color: "#7A887F",
     fontSize: 12,
     marginTop: 2,
+  },
+  messageCustomerButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#245B43",
+    borderRadius: 9,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+  },
+  messageCustomerText: {
+    color: "#245B43",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  shipmentForm: {
+    gap: 9,
+    borderTopWidth: 1,
+    borderTopColor: "#E8EDE8",
+    paddingTop: 12,
+  },
+  returnRequestBox: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 9,
+    backgroundColor: "#FFF8E8",
+    gap: 8,
   },
   orderActionRow: {
     flexDirection: "row",

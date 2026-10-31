@@ -8,11 +8,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
 
-const tabs = [
+const customerTabs = [
   { name: "Home", icon: "⌂", route: "/" },
   { name: "Explore", icon: "⌕", route: "/explore" },
   { name: "Cart", icon: "🛍️", route: "/cart" },
+  { name: "Orders", icon: "▤", route: "/orders" },
   { name: "Favorites", icon: "♡", route: "/favorites" },
   { name: "Profile", icon: "♙", route: "/profile" },
 ];
@@ -20,7 +22,12 @@ const tabs = [
 export default function UserTabBar() {
   const pathname = usePathname();
   const { cartCount } = useCart();
+  const { user, isLoading } = useAuth();
   const insets = useSafeAreaInsets();
+
+  if (isLoading || user?.role !== "customer") {
+    return null;
+  }
 
   return (
     <View
@@ -29,7 +36,7 @@ export default function UserTabBar() {
         { paddingBottom: Math.max(insets.bottom, 8) },
       ]}
     >
-      {tabs.map((tab) => {
+      {customerTabs.map((tab) => {
         const active =
           tab.route === "/"
             ? pathname === "/"
@@ -105,7 +112,7 @@ const styles = StyleSheet.create({
     color: "#9AA398",
   },
   navLabel: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#9AA398",
     fontWeight: "600",
   },

@@ -357,6 +357,14 @@ export default function CheckoutScreen() {
             Continue Shopping
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => router.replace("/orders")}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.secondaryButtonText}>View My Orders</Text>
+        </TouchableOpacity>
       </ScrollView>
     );
   }

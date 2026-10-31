@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,19 +13,31 @@ import {
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  router,
-  Redirect,
-  useFocusEffect,
-  useLocalSearchParams,
-} from "expo-router";
+import { router, Redirect, useFocusEffect } from "expo-router";
 import { fetchProducts } from "../services/api";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 
 const FAVORITES_KEY = "likhaLocalFavorites";
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "https://likhalocal-api.onrender.com";
 
 const categories = ["All", "Food", "Crafts", "Fashion", "Home"];
+
+function getProductImageUrl(imageUrl) {
+  if (typeof imageUrl !== "string" || !imageUrl.trim()) {
+    return null;
+  }
+
+  const trimmedUrl = imageUrl.trim();
+
+  if (/^https?:\/\//i.test(trimmedUrl)) {
+    return trimmedUrl;
+  }
+
+  return `${API_BASE_URL}${trimmedUrl.startsWith("/") ? "" : "/"}${trimmedUrl}`;
+}
 
 function formatProduct(product) {
   let emoji = "🏡";
@@ -49,17 +62,38 @@ function formatProduct(product) {
     category: product.category || "Home",
     price: Number(product.price) || 0,
     stock: Number(product.stock) || 0,
+    imageUrl: getProductImageUrl(product.image_url),
     emoji,
     color,
   };
 }
 
+function ProductThumbnail({ imageUrl, backgroundColor, emoji, name }) {
+  const [imageError, setImageError] = useState(false);
+
+  return (
+    <View style={[styles.productImage, { backgroundColor }]}>
+      {imageUrl && !imageError ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.productPhoto}
+          resizeMode="cover"
+          onError={() => setImageError(true)}
+          accessibilityLabel={`${name} product image`}
+        />
+      ) : (
+        <Text style={styles.productEmoji}>{emoji}</Text>
+      )}
+      <Text style={styles.localBadge}>LOCAL</Text>
+    </View>
+  );
+}
+
 export default function ExploreScreen() {
   const { user, isLoading: authLoading } = useAuth();
   const { addToCart } = useCart();
-  const { fromStaff } = useLocalSearchParams();
 
-  const isStaffBrowsing = fromStaff === "true";
+  const isStaffBrowsing = user?.role === "staff";
 
   const [products, setProducts] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState([]);
@@ -198,7 +232,9 @@ export default function ExploreScreen() {
         <Text style={styles.eyebrow}>MADE WITH LOCAL LOVE</Text>
         <Text style={styles.title}>Explore Products</Text>
         <Text style={styles.subtitle}>
-          Discover unique finds from Filipino local makers.
+          {isStaffBrowsing
+            ? "Monitor approved products from Filipino local makers."
+            : "Discover unique finds from Filipino local makers."}
         </Text>
 
         <View style={styles.searchBox}>
@@ -303,17 +339,13 @@ export default function ExploreScreen() {
                     activeOpacity={0.85}
                     onPress={() => router.push(`/product/${product.id}`)}
                   >
-                    <View
-                      style={[
-                        styles.productImage,
-                        { backgroundColor: product.color },
-                      ]}
-                    >
-                      <Text style={styles.productEmoji}>
-                        {product.emoji}
-                      </Text>
-                      <Text style={styles.localBadge}>LOCAL</Text>
-                    </View>
+                    <ProductThumbnail
+                      key={product.imageUrl || product.id}
+                      imageUrl={product.imageUrl}
+                      backgroundColor={product.color}
+                      emoji={product.emoji}
+                      name={product.name}
+                    />
 
                     <View style={styles.productInfo}>
                       <Text style={styles.productCategory}>
@@ -331,38 +363,42 @@ export default function ExploreScreen() {
                     </View>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.heartButton}
-                    onPress={() => toggleFavorite(product)}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      isFavorite
-                        ? "Remove from Favorites"
-                        : "Add to Favorites"
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.heart,
-                        isFavorite && styles.heartActive,
-                      ]}
-                    >
-                      {isFavorite ? "♥" : "♡"}
-                    </Text>
-                  </TouchableOpacity>
+                  {!isStaffBrowsing && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.heartButton}
+                        onPress={() => toggleFavorite(product)}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isFavorite
+                            ? "Remove from Favorites"
+                            : "Add to Favorites"
+                        }
+                      >
+                        <Text
+                          style={[
+                            styles.heart,
+                            isFavorite && styles.heartActive,
+                          ]}
+                        >
+                          {isFavorite ? "♥" : "♡"}
+                        </Text>
+                      </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.addButton,
-                      product.stock <= 0 && styles.disabledButton,
-                    ]}
-                    disabled={product.stock <= 0}
-                    onPress={() => handleAddToCart(product)}
-                  >
-                    <Text style={styles.addButtonText}>
-                      {product.stock > 0 ? "Add to Cart" : "Out of Stock"}
-                    </Text>
-                  </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.addButton,
+                          product.stock <= 0 && styles.disabledButton,
+                        ]}
+                        disabled={product.stock <= 0}
+                        onPress={() => handleAddToCart(product)}
+                      >
+                        <Text style={styles.addButtonText}>
+                          {product.stock > 0 ? "Add to Cart" : "Out of Stock"}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </View>
               );
             })}
@@ -509,6 +545,10 @@ const styles = StyleSheet.create({
     height: 125,
     alignItems: "center",
     justifyContent: "center",
+  },
+  productPhoto: {
+    width: "100%",
+    height: "100%",
   },
   productEmoji: {
     fontSize: 55,

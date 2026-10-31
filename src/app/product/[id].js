@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocalSearchParams, router } from "expo-router";
 import { fetchProducts } from "../../services/api";
 import { useCart } from "../../context/CartContext";
+import { useAuth } from "../../context/AuthContext";
 import {
   SafeAreaView,
   ScrollView,
@@ -69,6 +70,8 @@ function formatProduct(product) {
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { addToCart } = useCart();
+  const { user, isLoading: authLoading } = useAuth();
+  const isStaffBrowsing = authLoading || user?.role === "staff";
 
   const [product, setProduct] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -175,11 +178,17 @@ export default function ProductDetailsScreen() {
           )}
 
           <TouchableOpacity
-            onPress={() => router.replace("/")}
+            onPress={() =>
+              router.replace(
+                isStaffBrowsing
+                  ? { pathname: "/explore", params: { fromStaff: "true" } }
+                  : "/"
+              )
+            }
             style={styles.backLink}
           >
             <Text style={styles.backLinkText}>
-              {"<"} Back to shopping
+              {isStaffBrowsing ? "‹ Back to Explore" : "< Back to shopping"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -216,7 +225,7 @@ export default function ProductDetailsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
-        {showSuccess && (
+        {!isStaffBrowsing && showSuccess && (
           <View
             style={styles.successNotification}
             accessibilityRole="alert"
@@ -253,11 +262,17 @@ export default function ProductDetailsScreen() {
         )}
 
         <TouchableOpacity
-          onPress={() => router.replace("/")}
+          onPress={() =>
+            router.replace(
+              isStaffBrowsing
+                ? { pathname: "/explore", params: { fromStaff: "true" } }
+                : "/"
+            )
+          }
           style={styles.backLink}
         >
           <Text style={styles.backLinkText}>
-            {"<"} Back to shopping
+            {isStaffBrowsing ? "‹ Back to Explore" : "< Back to shopping"}
           </Text>
         </TouchableOpacity>
 
@@ -331,45 +346,48 @@ export default function ProductDetailsScreen() {
 
         <View style={styles.notice}>
           <Text style={styles.noticeTitle}>
-            Support local makers
+            {isStaffBrowsing ? "Staff monitoring view" : "Support local makers"}
           </Text>
 
           <Text style={styles.noticeText}>
-            Discover products and stories from Filipino makers and
-            small businesses.
+            {isStaffBrowsing
+              ? "Product details are shown for monitoring. Purchase actions are disabled for staff."
+              : "Discover products and stories from Filipino makers and small businesses."}
           </Text>
         </View>
 
         {/* Add to Cart and Buy Now buttons */}
-        <View style={styles.actionButtons}>
-          <TouchableOpacity
-            style={[
-              styles.cartButton,
-              styles.actionButton,
-              isOutOfStock && styles.disabledButton,
-            ]}
-            disabled={isOutOfStock}
-            onPress={handleAddToCart}
-            accessibilityRole="button"
-          >
-            <Text style={styles.cartButtonText}>
-              {isOutOfStock ? "Out of Stock" : "Add to Cart"}
-            </Text>
-          </TouchableOpacity>
+        {!isStaffBrowsing && (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[
+                styles.cartButton,
+                styles.actionButton,
+                isOutOfStock && styles.disabledButton,
+              ]}
+              disabled={isOutOfStock}
+              onPress={handleAddToCart}
+              accessibilityRole="button"
+            >
+              <Text style={styles.cartButtonText}>
+                {isOutOfStock ? "Out of Stock" : "Add to Cart"}
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.buyNowButton,
-              styles.actionButton,
-              isOutOfStock && styles.disabledButton,
-            ]}
-            disabled={isOutOfStock}
-            onPress={handleBuyNow}
-            accessibilityRole="button"
-          >
-            <Text style={styles.cartButtonText}>Buy Now</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[
+                styles.buyNowButton,
+                styles.actionButton,
+                isOutOfStock && styles.disabledButton,
+              ]}
+              disabled={isOutOfStock}
+              onPress={handleBuyNow}
+              accessibilityRole="button"
+            >
+              <Text style={styles.cartButtonText}>Buy Now</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.disclaimer}>
           Product information is retrieved from the LikhaLocal database.

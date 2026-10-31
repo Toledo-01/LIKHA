@@ -213,3 +213,99 @@ export async function createCustomerOrder(order) {
 
   return data.order;
 }
+
+async function authenticatedOrderRequest(path, options = {}) {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Please log in to view your orders.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || "Unable to complete the order request.");
+  }
+
+  return data;
+}
+
+export async function fetchCustomerOrders() {
+  const data = await authenticatedOrderRequest("/api/customer/orders");
+  return data.orders || [];
+}
+
+export async function fetchOrderConversations() {
+  const data = await authenticatedOrderRequest("/api/orders/conversations");
+  return data.conversations || [];
+}
+
+export async function fetchOrderMessages(orderId, sellerId) {
+  const query = new URLSearchParams({ sellerId: String(sellerId) });
+  const data = await authenticatedOrderRequest(
+    `/api/orders/${encodeURIComponent(orderId)}/messages?${query}`
+  );
+  return data.messages || [];
+}
+
+export async function sendOrderMessage(orderId, sellerId, message) {
+  return authenticatedOrderRequest(
+    `/api/orders/${encodeURIComponent(orderId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({ sellerId, message }),
+    }
+  );
+}
+
+export async function markSellerOrderShipped(orderId, shipment) {
+  return authenticatedOrderRequest(
+    `/api/seller/orders/${encodeURIComponent(orderId)}/shipment`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(shipment),
+    }
+  );
+}
+
+export async function confirmOrderDelivery(orderId, sellerId) {
+  return authenticatedOrderRequest(
+    `/api/customer/orders/${encodeURIComponent(orderId)}/delivery`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ sellerId }),
+    }
+  );
+}
+
+export async function submitProductReview(orderItemId, rating, comment) {
+  return authenticatedOrderRequest("/api/customer/reviews", {
+    method: "POST",
+    body: JSON.stringify({ orderItemId, rating, comment }),
+  });
+}
+
+export async function submitReturnRequest(orderItemId, reason, details) {
+  return authenticatedOrderRequest("/api/customer/returns", {
+    method: "POST",
+    body: JSON.stringify({ orderItemId, reason, details }),
+  });
+}
+
+export async function respondToReturnRequest(returnId, decision, response) {
+  return authenticatedOrderRequest(
+    `/api/seller/returns/${encodeURIComponent(returnId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ decision, response }),
+    }
+  );
+}

@@ -1486,7 +1486,7 @@ app.post(
       return res.status(201).json({
         success: true,
         message:
-          "Product submitted successfully and is awaiting admin approval.",
+          "Product submitted successfully and is now available for staff review. An administrator makes the final approval decision.",
         product: {
           id: result.insertId,
           seller_id: req.userId,
@@ -2691,6 +2691,16 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
       }
     }
 
+    await connection.execute(
+      `INSERT INTO seller_order_status (order_id, seller_id, status)
+       SELECT ?, p.seller_id, 'pending'
+       FROM order_items oi
+       JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = ?
+       GROUP BY p.seller_id`,
+      [orderId, orderId]
+    );
+
     await connection.commit();
     transactionStarted = false;
 
@@ -2731,6 +2741,700 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
   }
 });
 
+app.get("/api/customer/orders", ...authenticateCustomer, async (req, res) => {
+  try {
+    await pool.execute(
+      `INSERT IGNORE INTO seller_order_status (order_id, seller_id, status)
+       SELECT DISTINCT o.id, p.seller_id, 'pending'
+       FROM orders o
+       JOIN order_items oi ON oi.order_id = o.id
+       JOIN products p ON p.id = oi.product_id
+       WHERE o.customer_id = ?`,
+      [req.customerId]
+    );
+
+    const [rows] = await pool.execute(
+      `SELECT
+         o.id AS order_id,
+         o.total_amount,
+         o.delivery_address,
+         o.contact_number,
+         o.status AS order_status,
+         o.created_at,
+         o.delivery_fee,
+         o.payment_method,
+         o.payment_status,
+         o.delivery_fee_status,
+         oi.id AS order_item_id,
+         oi.product_id,
+         oi.product_name,
+         oi.quantity,
+         oi.unit_price,
+         p.image_url,
+         p.seller_id,
+         seller.full_name AS seller_name,
+         sos.status AS seller_status,
+         sos.tracking_carrier,
+         sos.tracking_number,
+         sos.shipped_at,
+         sos.delivered_at,
+         review.id AS review_id,
+         review.rating AS review_rating,
+         review.comment AS review_comment,
+         returnRequest.id AS return_id,
+         returnRequest.reason AS return_reason,
+         returnRequest.details AS return_details,
+         returnRequest.status AS return_status,
+         returnRequest.seller_response AS return_seller_response
+       FROM orders o
+       JOIN order_items oi ON oi.order_id = o.id
+       LEFT JOIN products p ON p.id = oi.product_id
+       LEFT JOIN users seller ON seller.id = p.seller_id
+       LEFT JOIN seller_order_status sos
+         ON sos.order_id = o.id AND sos.seller_id = p.seller_id
+       LEFT JOIN product_reviews review ON review.order_item_id = oi.id
+       LEFT JOIN return_requests returnRequest
+         ON returnRequest.order_item_id = oi.id
+       WHERE o.customer_id = ?
+       ORDER BY o.created_at DESC, o.id DESC, oi.id ASC`,
+      [req.customerId]
+    );
+
+    const orderMap = new Map();
+
+    for (const row of rows) {
+      if (!orderMap.has(row.order_id)) {
+        orderMap.set(row.order_id, {
+          id: row.order_id,
+          totalAmount: Number(row.total_amount),
+          deliveryAddress: row.delivery_address,
+          contactNumber: row.contact_number,
+          orderStatus: row.order_status,
+          createdAt: row.created_at,
+          deliveryFee: Number(row.delivery_fee),
+          paymentMethod: row.payment_method,
+          paymentStatus: row.payment_status,
+          deliveryFeeStatus: row.delivery_fee_status,
+          items: [],
+          sellers: new Map(),
+        });
+      }
+
+      const order = orderMap.get(row.order_id);
+      const sellerKey = String(row.seller_id || "unknown");
+      const sellerStatus = row.seller_status || "pending";
+
+      if (!order.sellers.has(sellerKey)) {
+        order.sellers.set(sellerKey, {
+          sellerId: row.seller_id,
+          sellerName: row.seller_name || "Local Seller",
+          status: sellerStatus,
+          trackingCarrier: row.tracking_carrier,
+          trackingNumber: row.tracking_number,
+          shippedAt: row.shipped_at,
+          deliveredAt: row.delivered_at,
+        });
+      } else {
+        const seller = order.sellers.get(sellerKey);
+        if (sellerStatus === "shipped" || sellerStatus === "delivered") {
+          seller.status = sellerStatus;
+        } else if (seller.status === "pending" && sellerStatus !== "pending") {
+          seller.status = sellerStatus;
+        }
+      }
+
+      order.items.push({
+        id: row.order_item_id,
+        productId: row.product_id,
+        productName: row.product_name,
+        imageUrl: row.image_url,
+        sellerId: row.seller_id,
+        sellerName: row.seller_name || "Local Seller",
+        quantity: Number(row.quantity),
+        unitPrice: Number(row.unit_price),
+        subtotal: Number(row.quantity) * Number(row.unit_price),
+        sellerStatus,
+        trackingCarrier: row.tracking_carrier,
+        trackingNumber: row.tracking_number,
+        shippedAt: row.shipped_at,
+        deliveredAt: row.delivered_at,
+        review: row.review_id
+          ? {
+              id: row.review_id,
+              rating: Number(row.review_rating),
+              comment: row.review_comment,
+            }
+          : null,
+        returnRequest: row.return_id
+          ? {
+              id: row.return_id,
+              reason: row.return_reason,
+              details: row.return_details,
+              status: row.return_status,
+              sellerResponse: row.return_seller_response,
+            }
+          : null,
+      });
+    }
+
+    const orders = Array.from(orderMap.values()).map((order) => {
+      const sellers = Array.from(order.sellers.values());
+      const statuses = sellers.map((seller) => seller.status);
+      let derivedStatus = order.orderStatus;
+
+      if (
+        statuses.length > 0 &&
+        statuses.every((status) => status === "delivered" || status === "rejected")
+      ) {
+        derivedStatus = statuses.every((status) => status === "rejected")
+          ? "cancelled"
+          : "delivered";
+      } else if (statuses.some((status) => status === "shipped")) {
+        derivedStatus = "shipped";
+      } else if (statuses.some((status) => status === "processing")) {
+        derivedStatus = "processing";
+      } else if (statuses.some((status) => status === "confirmed")) {
+        derivedStatus = "confirmed";
+      } else if (statuses.some((status) => status === "pending")) {
+        derivedStatus = "pending";
+      }
+
+      return {
+        ...order,
+        sellers,
+        orderStatus: derivedStatus,
+      };
+    });
+
+    return res.json({ success: true, orders });
+  } catch (error) {
+    console.error("Fetch customer orders error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load your orders.",
+    });
+  }
+});
+
+app.get(
+  "/api/orders/conversations",
+  authenticateUser,
+  allowRoles("customer", "seller"),
+  async (req, res) => {
+    try {
+      const isCustomer = req.userRole === "customer";
+      const participantId = req.userId;
+      const [rows] = await pool.execute(
+        `SELECT
+           o.id AS order_id,
+           o.created_at AS order_created_at,
+           ${isCustomer ? "seller.id" : "customer.id"} AS other_user_id,
+           ${isCustomer ? "seller.full_name" : "customer.full_name"} AS other_name,
+           p.seller_id,
+           (
+             SELECT message
+             FROM order_messages
+             WHERE order_id = o.id AND seller_id = p.seller_id
+             ORDER BY id DESC
+             LIMIT 1
+           ) AS last_message,
+           (
+             SELECT created_at
+             FROM order_messages
+             WHERE order_id = o.id AND seller_id = p.seller_id
+             ORDER BY id DESC
+             LIMIT 1
+           ) AS last_message_at,
+           (
+             SELECT COUNT(*)
+             FROM order_messages unread
+             WHERE unread.order_id = o.id
+               AND unread.seller_id = p.seller_id
+               AND unread.sender_id <> ?
+               AND unread.read_at IS NULL
+           ) AS unread_count
+         FROM orders o
+         JOIN order_items oi ON oi.order_id = o.id
+         JOIN products p ON p.id = oi.product_id
+         JOIN users seller ON seller.id = p.seller_id
+         JOIN users customer ON customer.id = o.customer_id
+         WHERE ${isCustomer ? "o.customer_id = ?" : "p.seller_id = ?"}
+         GROUP BY o.id, o.created_at, other_user_id, other_name, p.seller_id
+         ORDER BY COALESCE(last_message_at, o.created_at) DESC, o.id DESC`,
+        [participantId, participantId]
+      );
+
+      return res.json({
+        success: true,
+        conversations: rows.map((row) => ({
+          orderId: row.order_id,
+          orderCreatedAt: row.order_created_at,
+          sellerId: row.seller_id,
+          otherUserId: row.other_user_id,
+          otherName: row.other_name,
+          lastMessage: row.last_message,
+          lastMessageAt: row.last_message_at,
+          unreadCount: Number(row.unread_count),
+        })),
+      });
+    } catch (error) {
+      console.error("Fetch order conversations error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load order messages.",
+      });
+    }
+  }
+);
+
+async function verifyOrderConversationAccess(orderId, sellerId, userId, role) {
+  const [rows] = await pool.execute(
+    `SELECT o.id
+     FROM orders o
+     JOIN order_items oi ON oi.order_id = o.id
+     JOIN products p ON p.id = oi.product_id
+     WHERE o.id = ?
+       AND p.seller_id = ?
+       AND ${role === "customer" ? "o.customer_id = ?" : "p.seller_id = ?"}
+     LIMIT 1`,
+    [orderId, sellerId, userId]
+  );
+  return rows.length > 0;
+}
+
+app.get(
+  "/api/orders/:orderId/messages",
+  authenticateUser,
+  allowRoles("customer", "seller"),
+  async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    const sellerId = Number(req.query.sellerId);
+
+    if (!Number.isSafeInteger(orderId) || orderId < 1 ||
+        !Number.isSafeInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid order and seller are required.",
+      });
+    }
+
+    try {
+      const allowed = await verifyOrderConversationAccess(
+        orderId,
+        sellerId,
+        req.userId,
+        req.userRole
+      );
+
+      if (!allowed) {
+        return res.status(404).json({
+          success: false,
+          message: "Order conversation not found.",
+        });
+      }
+
+      await pool.execute(
+        `UPDATE order_messages
+         SET read_at = CURRENT_TIMESTAMP
+         WHERE order_id = ?
+           AND seller_id = ?
+           AND sender_id <> ?
+           AND read_at IS NULL`,
+        [orderId, sellerId, req.userId]
+      );
+
+      const [messages] = await pool.execute(
+        `SELECT id, sender_id, message, read_at, created_at
+         FROM order_messages
+         WHERE order_id = ? AND seller_id = ?
+         ORDER BY id ASC`,
+        [orderId, sellerId]
+      );
+
+      return res.json({
+        success: true,
+        messages: messages.map((message) => ({
+          id: message.id,
+          senderId: message.sender_id,
+          message: message.message,
+          readAt: message.read_at,
+          createdAt: message.created_at,
+        })),
+      });
+    } catch (error) {
+      console.error("Fetch order messages error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load this conversation.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/orders/:orderId/messages",
+  authenticateUser,
+  allowRoles("customer", "seller"),
+  async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    const sellerId = Number(req.body?.sellerId);
+    const message =
+      typeof req.body?.message === "string" ? req.body.message.trim() : "";
+
+    if (!Number.isSafeInteger(orderId) || orderId < 1 ||
+        !Number.isSafeInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid order and seller are required.",
+      });
+    }
+
+    if (!message || message.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Message must be between 1 and 2000 characters.",
+      });
+    }
+
+    try {
+      const allowed = await verifyOrderConversationAccess(
+        orderId,
+        sellerId,
+        req.userId,
+        req.userRole
+      );
+
+      if (!allowed) {
+        return res.status(404).json({
+          success: false,
+          message: "Order conversation not found.",
+        });
+      }
+
+      const [result] = await pool.execute(
+        `INSERT INTO order_messages (order_id, seller_id, sender_id, message)
+         VALUES (?, ?, ?, ?)`,
+        [orderId, sellerId, req.userId, message]
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: {
+          id: result.insertId,
+          senderId: req.userId,
+          message,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error("Send order message error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to send your message.",
+      });
+    }
+  }
+);
+
+app.patch(
+  "/api/seller/orders/:orderId/shipment",
+  authenticateUser,
+  allowRoles("seller"),
+  async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    const carrier =
+      typeof req.body?.carrier === "string" ? req.body.carrier.trim() : "";
+    const trackingNumber =
+      typeof req.body?.trackingNumber === "string"
+        ? req.body.trackingNumber.trim()
+        : "";
+
+    if (!Number.isSafeInteger(orderId) || orderId < 1) {
+      return res.status(400).json({ success: false, message: "Invalid order ID." });
+    }
+
+    if (!carrier || carrier.length > 100 ||
+        !trackingNumber || trackingNumber.length > 120) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a carrier and tracking number.",
+      });
+    }
+
+    let connection;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [result] = await connection.execute(
+        `UPDATE seller_order_status
+         SET status = 'shipped',
+             tracking_carrier = ?,
+             tracking_number = ?,
+             shipped_at = CURRENT_TIMESTAMP
+         WHERE order_id = ?
+           AND seller_id = ?
+           AND status IN ('confirmed', 'processing')`,
+        [carrier, trackingNumber, orderId, req.userId]
+      );
+
+      if (result.affectedRows !== 1) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "Only an accepted order can be marked as shipped.",
+        });
+      }
+
+      await connection.execute(
+        `UPDATE orders o
+         SET o.status = 'shipped'
+         WHERE o.id = ?
+           AND EXISTS (
+             SELECT 1 FROM seller_order_status currentStatus
+             WHERE currentStatus.order_id = o.id
+               AND currentStatus.status IN ('shipped', 'delivered')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM seller_order_status pendingStatus
+             WHERE pendingStatus.order_id = o.id
+               AND pendingStatus.status NOT IN ('shipped', 'delivered', 'rejected')
+           )`,
+        [orderId]
+      );
+
+      await connection.commit();
+      return res.json({ success: true, message: "Shipment details saved." });
+    } catch (error) {
+      if (connection) await connection.rollback().catch(() => {});
+      console.error("Update seller shipment error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to save shipment details.",
+      });
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
+
+app.patch(
+  "/api/customer/orders/:orderId/delivery",
+  ...authenticateCustomer,
+  async (req, res) => {
+    const orderId = Number(req.params.orderId);
+    const sellerId = Number(req.body?.sellerId);
+
+    if (!Number.isSafeInteger(orderId) || orderId < 1 ||
+        !Number.isSafeInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid order and seller are required.",
+      });
+    }
+
+    let connection;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [result] = await connection.execute(
+        `UPDATE seller_order_status sos
+         JOIN orders o ON o.id = sos.order_id
+         SET sos.status = 'delivered',
+             sos.delivered_at = CURRENT_TIMESTAMP
+         WHERE sos.order_id = ?
+           AND sos.seller_id = ?
+           AND o.customer_id = ?
+           AND sos.status = 'shipped'`,
+        [orderId, sellerId, req.customerId]
+      );
+
+      if (result.affectedRows !== 1) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "This shipment cannot be marked as received yet.",
+        });
+      }
+
+      await connection.execute(
+        `UPDATE orders o
+         SET o.status = 'delivered'
+         WHERE o.id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM seller_order_status notDelivered
+             WHERE notDelivered.order_id = o.id
+               AND notDelivered.status NOT IN ('delivered', 'rejected')
+           )`,
+        [orderId]
+      );
+
+      await connection.commit();
+      return res.json({ success: true, message: "Order marked as received." });
+    } catch (error) {
+      if (connection) await connection.rollback().catch(() => {});
+      console.error("Confirm customer delivery error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to confirm delivery.",
+      });
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
+
+app.post(
+  "/api/customer/reviews",
+  ...authenticateCustomer,
+  async (req, res) => {
+    const orderItemId = Number(req.body?.orderItemId);
+    const rating = Number(req.body?.rating);
+    const comment =
+      typeof req.body?.comment === "string" ? req.body.comment.trim() : "";
+
+    if (!Number.isSafeInteger(orderItemId) || orderItemId < 1 ||
+        !Number.isInteger(rating) || rating < 1 || rating > 5 ||
+        comment.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide a valid order item, 1–5 star rating, and comment under 2000 characters.",
+      });
+    }
+
+    try {
+      const [items] = await pool.execute(
+        `SELECT oi.order_id, oi.product_id, sos.status
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         JOIN products p ON p.id = oi.product_id
+         JOIN seller_order_status sos
+           ON sos.order_id = o.id AND sos.seller_id = p.seller_id
+         WHERE oi.id = ? AND o.customer_id = ?
+         LIMIT 1`,
+        [orderItemId, req.customerId]
+      );
+
+      if (!items.length || items[0].status !== "delivered") {
+        return res.status(409).json({
+          success: false,
+          message: "You can review a product after its delivery is confirmed.",
+        });
+      }
+
+      const item = items[0];
+      await pool.execute(
+        `INSERT INTO product_reviews
+           (order_id, order_item_id, product_id, customer_id, rating, comment)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          item.order_id,
+          orderItemId,
+          item.product_id,
+          req.customerId,
+          rating,
+          comment || null,
+        ]
+      );
+
+      return res.status(201).json({ success: true, message: "Review submitted." });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({
+          success: false,
+          message: "This order item has already been reviewed.",
+        });
+      }
+      console.error("Submit product review error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to submit your review.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/customer/returns",
+  ...authenticateCustomer,
+  async (req, res) => {
+    const orderItemId = Number(req.body?.orderItemId);
+    const reason =
+      typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    const details =
+      typeof req.body?.details === "string" ? req.body.details.trim() : "";
+    const allowedReasons = [
+      "Damaged item",
+      "Wrong item",
+      "Missing parts",
+      "Not as described",
+      "Other",
+    ];
+
+    if (!Number.isSafeInteger(orderItemId) || orderItemId < 1 ||
+        !allowedReasons.includes(reason) || details.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose a return reason and provide details under 2000 characters.",
+      });
+    }
+
+    try {
+      const [items] = await pool.execute(
+        `SELECT oi.order_id, p.seller_id, sos.status
+         FROM order_items oi
+         JOIN orders o ON o.id = oi.order_id
+         JOIN products p ON p.id = oi.product_id
+         JOIN seller_order_status sos
+           ON sos.order_id = o.id AND sos.seller_id = p.seller_id
+         WHERE oi.id = ? AND o.customer_id = ?
+         LIMIT 1`,
+        [orderItemId, req.customerId]
+      );
+
+      if (!items.length || items[0].status !== "delivered") {
+        return res.status(409).json({
+          success: false,
+          message: "Returns can only be requested for delivered items.",
+        });
+      }
+
+      const item = items[0];
+      await pool.execute(
+        `INSERT INTO return_requests
+           (order_id, order_item_id, customer_id, seller_id, reason, details)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          item.order_id,
+          orderItemId,
+          req.customerId,
+          item.seller_id,
+          reason,
+          details || null,
+        ]
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: "Return request sent to the seller.",
+      });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({
+          success: false,
+          message: "A return request already exists for this item.",
+        });
+      }
+      console.error("Submit return request error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to submit your return request.",
+      });
+    }
+  }
+);
+
 // =========================
 // SELLER ORDER MANAGEMENT
 // =========================
@@ -2760,6 +3464,7 @@ app.get(
         `SELECT
             o.id AS order_id,
             o.customer_id,
+            customer.full_name AS customer_name,
             o.delivery_address,
             o.contact_number,
             o.total_amount,
@@ -2769,16 +3474,26 @@ app.get(
             o.status AS order_status,
             o.created_at,
             sos.status AS seller_status,
+            sos.tracking_carrier,
+            sos.tracking_number,
+            sos.shipped_at,
+            rr.id AS return_id,
+            rr.reason AS return_reason,
+            rr.details AS return_details,
+            rr.status AS return_status,
             oi.product_id,
+            oi.id AS order_item_id,
             oi.product_name,
             oi.quantity,
             oi.unit_price
          FROM seller_order_status sos
          JOIN orders o ON o.id = sos.order_id
+         JOIN users customer ON customer.id = o.customer_id
          JOIN order_items oi ON oi.order_id = o.id
          JOIN products p
            ON p.id = oi.product_id
           AND p.seller_id = sos.seller_id
+         LEFT JOIN return_requests rr ON rr.order_item_id = oi.id
          WHERE sos.seller_id = ?
          ORDER BY o.created_at DESC, o.id DESC`,
         [sellerId]
@@ -2791,6 +3506,7 @@ app.get(
           ordersById.set(row.order_id, {
             id: row.order_id,
             customerId: row.customer_id,
+            customerName: row.customer_name,
             deliveryAddress: row.delivery_address,
             contactNumber: row.contact_number,
             totalAmount: Number(row.total_amount),
@@ -2799,17 +3515,29 @@ app.get(
             paymentStatus: row.payment_status,
             orderStatus: row.order_status,
             sellerStatus: row.seller_status,
+            trackingCarrier: row.tracking_carrier,
+            trackingNumber: row.tracking_number,
+            shippedAt: row.shipped_at,
             createdAt: row.created_at,
             items: [],
           });
         }
 
         ordersById.get(row.order_id).items.push({
+          orderItemId: row.order_item_id,
           productId: row.product_id,
           productName: row.product_name,
           quantity: row.quantity,
           unitPrice: Number(row.unit_price),
           subtotal: Number(row.unit_price) * row.quantity,
+          returnRequest: row.return_id
+            ? {
+                id: row.return_id,
+                reason: row.return_reason,
+                details: row.return_details,
+                status: row.return_status,
+              }
+            : null,
         });
       }
 
@@ -2822,6 +3550,54 @@ app.get(
       return res.status(500).json({
         success: false,
         message: "Unable to load seller orders.",
+      });
+    }
+  }
+);
+
+app.patch(
+  "/api/seller/returns/:returnId",
+  authenticateUser,
+  allowRoles("seller"),
+  async (req, res) => {
+    const returnId = Number(req.params.returnId);
+    const decision = req.body?.decision;
+    const response =
+      typeof req.body?.response === "string" ? req.body.response.trim() : "";
+
+    if (!Number.isSafeInteger(returnId) || returnId < 1 ||
+        !["approved", "rejected"].includes(decision) ||
+        response.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide a valid return decision and response.",
+      });
+    }
+
+    try {
+      const [result] = await pool.execute(
+        `UPDATE return_requests
+         SET status = ?, seller_response = ?
+         WHERE id = ? AND seller_id = ? AND status = 'requested'`,
+        [decision, response || null, returnId, req.userId]
+      );
+
+      if (result.affectedRows !== 1) {
+        return res.status(404).json({
+          success: false,
+          message: "Pending return request not found.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `Return request ${decision}.`,
+      });
+    } catch (error) {
+      console.error("Respond to return request error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to update the return request.",
       });
     }
   }
