@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,8 +14,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../context/AuthContext";
+import { fetchMyActivity } from "../services/auth";
 
 export default function ProfileScreen() {
   const {
@@ -36,6 +37,33 @@ export default function ProfileScreen() {
 
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [activities, setActivities] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState("");
+
+  const loadActivity = useCallback(async () => {
+    setActivityLoading(true);
+    setActivityError("");
+
+    try {
+      setActivities(await fetchMyActivity());
+    } catch (error) {
+      console.error("Could not load activity history:", error);
+      setActivityError(
+        error.message || "Could not load your activity history."
+      );
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user && !isLoading) {
+        loadActivity();
+      }
+    }, [isLoading, loadActivity, user])
+  );
 
   // Load the current user's information into the form.
   useEffect(() => {
@@ -579,6 +607,78 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <View style={styles.activityHeader}>
+            <View style={styles.activityHeading}>
+              <Text style={styles.sectionTitle}>Recent Activity</Text>
+              <Text style={styles.activityDescription}>
+                Recent actions from your {role} account.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={loadActivity}
+              disabled={activityLoading}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh activity history"
+            >
+              <Text style={styles.activityRefresh}>
+                {activityLoading ? "Loading..." : "Refresh"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.activityCard}>
+            {activityLoading ? (
+              <View style={styles.activityState}>
+                <ActivityIndicator color="#245B43" />
+                <Text style={styles.activityStateText}>
+                  Loading your recent activity...
+                </Text>
+              </View>
+            ) : activityError ? (
+              <View style={styles.activityState}>
+                <Text style={styles.activityError}>
+                  {activityError}
+                </Text>
+                <TouchableOpacity
+                  style={styles.activityRetryButton}
+                  onPress={loadActivity}
+                  accessibilityRole="button"
+                  accessibilityLabel="Try loading activity history again"
+                >
+                  <Text style={styles.activityRetryText}>Try Again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : activities.length === 0 ? (
+              <Text style={styles.activityStateText}>
+                Your recent actions will appear here.
+              </Text>
+            ) : (
+              activities.map((activity) => {
+                const timestamp = new Date(activity.created_at);
+                const dateLabel = Number.isNaN(timestamp.getTime())
+                  ? String(activity.created_at || "")
+                  : timestamp.toLocaleString();
+
+                return (
+                  <View key={String(activity.id)} style={styles.activityRow}>
+                    <View style={styles.activityDot} />
+                    <View style={styles.activityContent}>
+                      <Text style={styles.activitySummary}>
+                        {activity.summary}
+                      </Text>
+                      <Text style={styles.activityMeta}>
+                        {dateLabel}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        </View>
+
         {/* Role-specific About section */}
         <View style={styles.messageCard}>
           <Text style={styles.messageEmoji}>🧺</Text>
@@ -772,6 +872,90 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#243E2D",
     marginBottom: 13,
+  },
+  activityHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 13,
+  },
+  activityHeading: {
+    flex: 1,
+  },
+  activityDescription: {
+    fontSize: 12,
+    color: "#758173",
+    marginTop: -7,
+  },
+  activityRefresh: {
+    color: "#245B43",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  activityCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 19,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "#EEEEE7",
+  },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0E8",
+  },
+  activityDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#5B8968",
+    marginTop: 5,
+    marginRight: 12,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activitySummary: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+    color: "#2C4031",
+  },
+  activityMeta: {
+    fontSize: 11,
+    color: "#899389",
+    marginTop: 4,
+  },
+  activityState: {
+    alignItems: "center",
+    paddingVertical: 20,
+  },
+  activityStateText: {
+    fontSize: 12,
+    color: "#758173",
+    textAlign: "center",
+    paddingVertical: 17,
+  },
+  activityError: {
+    fontSize: 12,
+    color: "#B42318",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  activityRetryButton: {
+    backgroundColor: "#245B43",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  activityRetryText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   infoCard: {
     backgroundColor: "#FFFFFF",

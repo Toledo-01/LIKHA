@@ -109,7 +109,9 @@ export default function FavoritesScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace("/")}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Home"
         >
           <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>

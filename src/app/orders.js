@@ -273,6 +273,15 @@ export default function CustomerOrdersScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={refreshOrders} />
         }
       >
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.replace("/")}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Home"
+        >
+          <Text style={styles.backButtonText}>‹ Back to Home</Text>
+        </TouchableOpacity>
+
         <Text style={styles.eyebrow}>YOUR SHOPPING</Text>
         <Text style={styles.title}>My Orders</Text>
         <Text style={styles.subtitle}>
@@ -643,6 +652,8 @@ function OrderItemImage({ imageUrl }) {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#FAF9F5" },
   container: { padding: 18, paddingBottom: 30 },
+  backButton: { alignSelf: "flex-start", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#245B43", borderRadius: 10, paddingVertical: 10, paddingHorizontal: 13, marginBottom: 15 },
+  backButtonText: { color: "#245B43", fontSize: 13, fontWeight: "700" },
   center: { flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" },
   eyebrow: { color: "#78907B", fontSize: 10, fontWeight: "900", letterSpacing: 1.4 },
   title: { color: "#214D39", fontSize: 29, fontWeight: "900", marginTop: 4 },

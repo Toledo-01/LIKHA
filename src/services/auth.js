@@ -167,6 +167,54 @@ export async function getMyProfile() {
   return data.user;
 }
 
+export async function fetchMyActivity(limit = 30) {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Please log in first.");
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/activity/me?limit=${limit}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  const data = await parseResponse(
+    response,
+    "Could not load your activity history."
+  );
+
+  if (!Array.isArray(data.activities)) {
+    throw new Error(
+      "The server did not return a valid activity history."
+    );
+  }
+
+  return data.activities;
+}
+
+export async function recordLogoutActivity() {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Please log in first.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  await parseResponse(response, "Could not record your logout.");
+}
+
 /* =========================
    UPDATE CURRENT USER
 ========================= */

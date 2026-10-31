@@ -280,6 +280,54 @@ export default function AdminProductsScreen() {
     }
   };
 
+  const deleteProduct = async (product) => {
+    setProcessingId(product.id);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Please log in again.");
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/admin/products/${product.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.success === false) {
+        throw new Error(
+          data.message ||
+            `Could not delete the product (HTTP ${response.status}).`
+        );
+      }
+
+      setProducts((currentProducts) =>
+        currentProducts.filter(
+          (item) => String(item.id) !== String(product.id)
+        )
+      );
+
+      showMessage("Product deleted", `"${product.name}" was deleted.`);
+      await fetchProducts(false);
+    } catch (err) {
+      showMessage(
+        "Delete failed",
+        err.message || "Please try again."
+      );
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const handleStatusAction = (product, status) => {
     const action = status === "approved" ? "Approve" : "Reject";
 
@@ -288,6 +336,15 @@ export default function AdminProductsScreen() {
       `Are you sure you want to ${action.toLowerCase()} "${product.name}"?`,
       () => updateProductStatus(product, status),
       status === "rejected"
+    );
+  };
+
+  const handleDeleteAction = (product) => {
+    confirmAction(
+      "Delete product?",
+      `Are you sure you want to permanently delete "${product.name}"? Products included in order history cannot be deleted.`,
+      () => deleteProduct(product),
+      true
     );
   };
 
@@ -305,6 +362,7 @@ export default function AdminProductsScreen() {
     const isPending = status === "pending";
     const isProcessing =
       String(processingId) === String(item.id);
+    const isBusy = processingId !== null;
 
     return (
       <View style={styles.productCard}>
@@ -375,10 +433,10 @@ export default function AdminProductsScreen() {
               <TouchableOpacity
                 style={[
                   styles.approveButton,
-                  isProcessing && styles.disabledButton,
+                  isBusy && styles.disabledButton,
                 ]}
                 activeOpacity={0.7}
-                disabled={isProcessing}
+                disabled={isBusy}
                 onPress={() =>
                   handleStatusAction(item, "approved")
                 }
@@ -391,10 +449,10 @@ export default function AdminProductsScreen() {
               <TouchableOpacity
                 style={[
                   styles.rejectButton,
-                  isProcessing && styles.disabledButton,
+                  isBusy && styles.disabledButton,
                 ]}
                 activeOpacity={0.7}
-                disabled={isProcessing}
+                disabled={isBusy}
                 onPress={() =>
                   handleStatusAction(item, "rejected")
                 }
@@ -405,6 +463,22 @@ export default function AdminProductsScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          <TouchableOpacity
+            style={[
+              styles.deleteButton,
+              isBusy && styles.disabledButton,
+            ]}
+            activeOpacity={0.7}
+            disabled={isBusy}
+            onPress={() => handleDeleteAction(item)}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${item.name || "product"}`}
+          >
+            <Text style={styles.actionButtonText}>
+              {isProcessing ? "Please wait..." : "Delete Product"}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -698,6 +772,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 9,
     alignItems: "center",
+  },
+  deleteButton: {
+    backgroundColor: "#B91C1C",
+    borderRadius: 8,
+    paddingVertical: 9,
+    alignItems: "center",
+    marginTop: 10,
   },
   disabledButton: {
     opacity: 0.55,

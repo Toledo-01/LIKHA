@@ -213,6 +213,29 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+async function recordUserActivity(userId, role, activityType, summary) {
+  try {
+    await pool.execute(
+      `INSERT INTO user_activity
+         (user_id, user_role, activity_type, summary)
+       VALUES (?, ?, ?, ?)`,
+      [
+        userId,
+        role,
+        activityType,
+        String(summary).slice(0, 255),
+      ]
+    );
+  } catch (error) {
+    console.error("Record user activity error:", {
+      userId,
+      role,
+      activityType,
+      error,
+    });
+  }
+}
+
 // =========================
 // STAFF NOTIFICATIONS
 // =========================
@@ -310,6 +333,13 @@ app.patch(
           });
         }
       }
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "product_review",
+        "Marked a product review notification as read"
+      );
 
       return res.json({
         success: true,
@@ -556,6 +586,57 @@ const authenticateCustomer = [
   allowRoles("customer"),
 ];
 
+app.get("/api/activity/me", authenticateUser, async (req, res) => {
+  const requestedLimit = Number(req.query.limit ?? 30);
+
+  if (
+    !Number.isInteger(requestedLimit) ||
+    requestedLimit < 1 ||
+    requestedLimit > 100
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Activity history limit must be between 1 and 100.",
+    });
+  }
+
+  try {
+    const [activities] = await pool.execute(
+      `SELECT id, user_role, activity_type, summary, created_at
+       FROM user_activity
+       WHERE user_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`,
+      [req.userId, requestedLimit]
+    );
+
+    return res.json({
+      success: true,
+      activities,
+    });
+  } catch (error) {
+    console.error("Get user activity history error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load your activity history.",
+    });
+  }
+});
+
+app.post("/api/auth/logout", authenticateUser, async (req, res) => {
+  await recordUserActivity(
+    req.userId,
+    req.userRole,
+    "auth",
+    "Logged out of LikhaLocal"
+  );
+
+  return res.json({
+    success: true,
+    message: "Logout recorded.",
+  });
+});
+
 // =========================
 // 8. GENERAL ROUTES
 // =========================
@@ -671,6 +752,13 @@ app.post("/api/auth/register", async (req, res) => {
 
     const token = createToken(user);
 
+    await recordUserActivity(
+      user.id,
+      user.role,
+      "auth",
+      "Created a customer account"
+    );
+
     return res.status(201).json({
       success: true,
       message: "Customer account registered successfully.",
@@ -759,6 +847,13 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = createToken(user);
+
+    await recordUserActivity(
+      user.id,
+      user.role,
+      "auth",
+      "Signed in to LikhaLocal"
+    );
 
     return res.json({
       success: true,
@@ -960,6 +1055,13 @@ app.post("/api/auth/firebase-login", async (req, res) => {
     // Continue using the existing custom JWT for protected API routes.
     const token = createToken(user);
 
+    await recordUserActivity(
+      user.id,
+      user.role,
+      "auth",
+      "Signed in to LikhaLocal"
+    );
+
     return res.json({
       success: true,
       message: "Firebase login successful.",
@@ -1105,6 +1207,13 @@ app.put("/api/auth/me", authenticateUser, async (req, res) => {
       });
     }
 
+    await recordUserActivity(
+      req.userId,
+      req.userRole,
+      "profile",
+      "Updated profile information"
+    );
+
     return res.json({
       success: true,
       message: "Profile updated successfully.",
@@ -1176,6 +1285,13 @@ app.post(
           message: "User not found.",
         });
       }
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "profile",
+        "Updated profile picture"
+      );
 
       const [users] = await pool.execute(
         `SELECT
@@ -1483,6 +1599,13 @@ app.post(
         name: productName,
       });
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "product",
+        `Submitted product "${productName}" for review`
+      );
+
       return res.status(201).json({
         success: true,
         message:
@@ -1587,6 +1710,112 @@ app.get(
   }
 );
 
+// Permanently delete a product that has not been included in an order.
+app.delete(
+  "/api/admin/products/:id",
+  authenticateUser,
+  allowRoles("admin"),
+  async (req, res) => {
+    let connection;
+
+    try {
+      const productId = Number(req.params.id);
+
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product ID.",
+        });
+      }
+
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [products] = await connection.execute(
+        `SELECT id
+         FROM products
+         WHERE id = ?
+         FOR UPDATE`,
+        [productId]
+      );
+
+      if (products.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Product not found.",
+        });
+      }
+
+      const [orderItems] = await connection.execute(
+        `SELECT id
+         FROM order_items
+         WHERE product_id = ?
+         LIMIT 1`,
+        [productId]
+      );
+
+      if (orderItems.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message:
+            "This product is part of order history and cannot be permanently deleted.",
+        });
+      }
+
+      await connection.execute(
+        "DELETE FROM cart_items WHERE product_id = ?",
+        [productId]
+      );
+
+      const [result] = await connection.execute(
+        "DELETE FROM products WHERE id = ?",
+        [productId]
+      );
+
+      if (result.affectedRows !== 1) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Product not found.",
+        });
+      }
+
+      await connection.commit();
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "product",
+        `Deleted product #${productId}`
+      );
+
+      return res.json({
+        success: true,
+        message: "Product deleted successfully.",
+      });
+    } catch (error) {
+      if (connection) {
+        await connection.rollback().catch((rollbackError) => {
+          console.error("Rollback admin product deletion error:", rollbackError);
+        });
+      }
+
+      console.error("Delete admin product error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to delete the product.",
+      });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
 // Approve or reject a pending product
 app.patch(
   "/api/admin/products/:id/status",
@@ -1646,6 +1875,13 @@ app.patch(
           product: products[0],
         });
       }
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "product",
+        `${status === "approved" ? "Approved" : "Rejected"} product #${productId}`
+      );
 
       return res.json({
         success: true,
@@ -1820,6 +2056,13 @@ app.post(
             : null,
           cleanRole,
         ]
+      );
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "account_management",
+        `Created a ${cleanRole} account`
       );
 
       return res.status(201).json({
@@ -1999,6 +2242,13 @@ app.patch(
 
       await connection.commit();
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "account_management",
+        `${is_active ? "Activated" : "Deactivated"} ${targetUser.role} account #${targetUser.id}`
+      );
+
       return res.json({
         success: true,
         message: `Account ${is_active ? "activated" : "deactivated"} successfully.`,
@@ -2159,6 +2409,13 @@ app.get(
         });
       }
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "product_review",
+        `Inspected product #${productId}`
+      );
+
       return res.json({
         success: true,
         message: "Product details retrieved successfully.",
@@ -2316,6 +2573,13 @@ app.put(
         }
       }
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "seller_settings",
+        `Updated delivery fee to ₱${roundedFee.toFixed(2)}`
+      );
+
       return res.json({
         success: true,
         message: "Delivery fee saved successfully.",
@@ -2434,6 +2698,13 @@ app.put(
           });
         }
       }
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "seller_settings",
+        "Updated delivery origin"
+      );
 
       return res.json({
         success: true,
@@ -2703,6 +2974,13 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
 
     await connection.commit();
     transactionStarted = false;
+
+    await recordUserActivity(
+      req.customerId,
+      "customer",
+      "order",
+      `Placed order #${orderId}`
+    );
 
     return res.status(201).json({
       success: true,
@@ -3117,6 +3395,13 @@ app.post(
         [orderId, sellerId, req.userId, message]
       );
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "message",
+        `Sent a message about order #${orderId}`
+      );
+
       return res.status(201).json({
         success: true,
         message: {
@@ -3204,6 +3489,12 @@ app.patch(
       );
 
       await connection.commit();
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "shipment",
+        `Added tracking details for order #${orderId}`
+      );
       return res.json({ success: true, message: "Shipment details saved." });
     } catch (error) {
       if (connection) await connection.rollback().catch(() => {});
@@ -3271,6 +3562,12 @@ app.patch(
       );
 
       await connection.commit();
+      await recordUserActivity(
+        req.customerId,
+        "customer",
+        "order",
+        `Confirmed delivery for order #${orderId}`
+      );
       return res.json({ success: true, message: "Order marked as received." });
     } catch (error) {
       if (connection) await connection.rollback().catch(() => {});
@@ -3336,6 +3633,13 @@ app.post(
           rating,
           comment || null,
         ]
+      );
+
+      await recordUserActivity(
+        req.customerId,
+        "customer",
+        "review",
+        `Reviewed product #${item.product_id} from order #${item.order_id}`
       );
 
       return res.status(201).json({ success: true, message: "Review submitted." });
@@ -3413,6 +3717,13 @@ app.post(
           reason,
           details || null,
         ]
+      );
+
+      await recordUserActivity(
+        req.customerId,
+        "customer",
+        "return",
+        `Requested a return for order #${item.order_id}`
       );
 
       return res.status(201).json({
@@ -3589,6 +3900,13 @@ app.patch(
         });
       }
 
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "return",
+        `${decision === "approved" ? "Approved" : "Rejected"} return request #${returnId}`
+      );
+
       return res.json({
         success: true,
         message: `Return request ${decision}.`,
@@ -3680,6 +3998,13 @@ app.patch(
       }
 
       await connection.commit();
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "order",
+        `${decision === "confirmed" ? "Accepted" : "Rejected"} order #${orderId}`
+      );
 
       return res.json({
         success: true,

@@ -10,6 +10,7 @@ import {
   getToken,
   getMyProfile,
   loginCustomer,
+  recordLogoutActivity,
   registerCustomer,
   removeToken,
   updateMyProfile,
@@ -124,6 +125,12 @@ export function AuthProvider({ children }) {
 
   // Sign out and clear the saved session.
   async function logout() {
+    try {
+      await recordLogoutActivity();
+    } catch (error) {
+      console.error("Could not record logout activity:", error);
+    }
+
     await removeToken();
     setUser(null);
   }

@@ -11,7 +11,8 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { getToken, removeToken } from "../services/auth";
+import { useAuth } from "../context/AuthContext";
+import { getToken } from "../services/auth";
 
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -19,6 +20,7 @@ export const API_BASE_URL =
 
 export default function StaffScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,7 +111,7 @@ export default function StaffScreen() {
 
   const handleLogout = async () => {
     try {
-      await removeToken();
+      await logout();
       router.replace("/login");
     } catch (error) {
       console.error("Logout failed:", error);
@@ -661,5 +663,4 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-
 
