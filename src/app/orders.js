@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Redirect, router, useFocusEffect } from "expo-router";
 import { useAuth } from "../context/AuthContext";
+import { getEstimatedDeliveryRange } from "../services/deliveryEstimate";
 import {
   confirmOrderDelivery,
   fetchCustomerOrders,
@@ -525,12 +526,21 @@ function EmptyState({ title, message, actionLabel, onAction }) {
 }
 
 function OrderCard({ order, onMessage, onConfirmDelivery, onReview, onReturn }) {
+  const estimatedDelivery = getEstimatedDeliveryRange(order.createdAt);
+
   return (
     <View style={styles.orderCard}>
       <View style={styles.orderHeader}>
         <View>
           <Text style={styles.cardTitle}>Order #{order.id}</Text>
           <Text style={styles.orderDate}>{formatDate(order.createdAt)}</Text>
+          {order.orderStatus !== "delivered" &&
+          order.orderStatus !== "cancelled" &&
+          estimatedDelivery ? (
+            <Text style={styles.estimatedDelivery}>
+              Estimated delivery: {estimatedDelivery}
+            </Text>
+          ) : null}
         </View>
         <StatusPill value={order.orderStatus} />
       </View>
@@ -540,6 +550,9 @@ function OrderCard({ order, onMessage, onConfirmDelivery, onReview, onReturn }) 
           <OrderItemImage imageUrl={getImageUrl(item.imageUrl)} />
           <View style={styles.itemInfo}>
             <Text style={styles.itemName}>{item.productName}</Text>
+            {item.variantDetails ? (
+              <Text style={styles.itemMeta}>{item.variantDetails}</Text>
+            ) : null}
             <Text style={styles.itemMeta}>
               {item.sellerName} · Qty {item.quantity}
             </Text>
@@ -667,6 +680,7 @@ const styles = StyleSheet.create({
   orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   cardTitle: { color: "#243E2D", fontSize: 15, fontWeight: "800" },
   orderDate: { color: "#899389", fontSize: 11, marginTop: 4 },
+  estimatedDelivery: { color: "#426B50", fontSize: 11, fontWeight: "700", marginTop: 5 },
   statusPill: { backgroundColor: "#F1F4EC", borderRadius: 12, paddingVertical: 6, paddingHorizontal: 9 },
   statusPillText: { color: "#426B50", fontSize: 10, fontWeight: "800" },
   itemRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, borderTopColor: "#F0F0EA", paddingVertical: 11, gap: 8 },

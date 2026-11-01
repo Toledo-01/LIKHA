@@ -34,6 +34,30 @@ export async function fetchCategories() {
   return data.categories;
 }
 
+export async function createAdminCategory(name) {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Please log in first.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/admin/categories`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `******`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.success || !data.category) {
+    throw new Error(data.message || "Unable to create the category.");
+  }
+
+  return data.category;
+}
+
 // =========================
 // SHARED SELLER REQUEST
 // =========================
@@ -152,6 +176,12 @@ export async function saveSellerDeliveryOrigin(deliveryOrigin) {
 export async function fetchSellerOrders() {
   const data = await sellerRequest("/api/seller/orders");
   return data.orders || [];
+}
+
+// Fetch reviews for products owned by the logged-in seller.
+export async function fetchSellerReviews() {
+  const data = await sellerRequest("/api/seller/reviews");
+  return data.reviews || [];
 }
 
 // Approve or reject the seller's portion of an order

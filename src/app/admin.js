@@ -2,17 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Modal,
+  Pressable,
   RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../context/AuthContext";
 import { getToken } from "../services/auth";
+import { createAdminCategory, fetchCategories } from "../services/api";
+import AccountMenu from "../components/AccountMenu";
 
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -36,24 +41,42 @@ function StatCard({ title, value, description, onPress }) {
 }
 
 export default function AdminDashboardScreen() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   const [statistics, setStatistics] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [categories, setCategories] = useState([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesError, setCategoriesError] = useState("");
+  const [categoryName, setCategoryName] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryMessage, setCategoryMessage] = useState("");
+
+  const selectedCategory = categories.find(
+    (category) => Number(category.id) === Number(selectedCategoryId)
+  );
+  const filteredCategories = categories.filter((category) =>
+    String(category.name || "")
+      .toLowerCase()
+      .includes(categorySearch.trim().toLowerCase())
+  );
 
   const loadDashboard = useCallback(async (refresh = false) => {
-    if (refresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-
-    setError("");
-
     try {
       const token = await getToken();
+
+      if (refresh) {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
+
+      setError("");
 
       if (!token) {
         setError("Your session has expired. Please log in again.");
@@ -89,17 +112,89 @@ export default function AdminDashboardScreen() {
   }, []);
 
   useEffect(() => {
-    loadDashboard();
+    Promise.resolve().then(loadDashboard);
   }, [loadDashboard]);
 
-  const handleLogout = async () => {
+  const loadCategories = useCallback(async (isActive = () => true) => {
+    setCategoriesError("");
+
     try {
-      await logout();
-      router.replace("/login");
-    } catch (err) {
-      setError("Unable to log out. Please try again.");
+      const categoryData = await fetchCategories();
+
+      if (!Array.isArray(categoryData)) {
+        throw new Error("The server returned an invalid category list.");
+      }
+
+      if (isActive()) {
+        setCategories(categoryData);
+      }
+    } catch (loadError) {
+      console.error("Could not load categories:", loadError);
+      if (isActive()) {
+        setCategoriesError(
+          loadError.message || "Unable to load marketplace categories."
+        );
+      }
+    } finally {
+      if (isActive()) {
+        setCategoriesLoading(false);
+      }
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      setCategoriesLoading(true);
+      loadCategories(() => active);
+
+      return () => {
+        active = false;
+      };
+    }, [loadCategories])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+
+    try {
+      await Promise.all([loadDashboard(true), loadCategories()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadCategories, loadDashboard]);
+
+  async function handleCreateCategory() {
+    const cleanName = categoryName.trim();
+    setCategoryMessage("");
+    setCategoriesError("");
+
+    if (!cleanName) {
+      setCategoriesError("Enter a category name.");
+      return;
+    }
+
+    setSavingCategory(true);
+
+    try {
+      const category = await createAdminCategory(cleanName);
+      setCategories((current) =>
+        [...current, category].sort((first, second) =>
+          first.name.localeCompare(second.name)
+        )
+      );
+      setSelectedCategoryId(category.id);
+      setCategoryName("");
+      setCategoryMessage(`${category.name} was added successfully.`);
+      await loadDashboard(true);
+    } catch (createError) {
+      setCategoriesError(
+        createError.message || "Unable to create the category."
+      );
+    } finally {
+      setSavingCategory(false);
+    }
+  }
 
   const openUsers = () => {
     router.push("/admin-users");
@@ -141,7 +236,7 @@ export default function AdminDashboardScreen() {
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
-            onRefresh={() => loadDashboard(true)}
+            onRefresh={handleRefresh}
             tintColor="#245B43"
           />
         }
@@ -159,14 +254,7 @@ export default function AdminDashboardScreen() {
               <Text style={styles.subtitle}>ADMINISTRATION</Text>
             </View>
           </View>
-
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={handleLogout}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
+          <AccountMenu />
         </View>
 
         <View style={styles.welcomeSection}>
@@ -301,17 +389,107 @@ export default function AdminDashboardScreen() {
 
             <Text style={styles.sectionTitle}>Categories</Text>
 
-            <View style={styles.statsGrid}>
-              <StatCard
-                title="Total Categories"
-                value={statistics.categories?.total}
-                description="Marketplace categories"
-                onPress={() =>
-                  setError(
-                    "The category list screen has not been implemented yet."
-                  )
-                }
-              />
+            <View style={styles.categoryCard}>
+              <Text style={styles.categoryCardTitle}>
+                Marketplace categories
+              </Text>
+
+              {categoriesLoading ? (
+                <View style={styles.categoryLoading}>
+                  <ActivityIndicator size="small" color="#245B43" />
+                  <Text style={styles.categoryHelper}>
+                    Loading categories...
+                  </Text>
+                </View>
+              ) : categoriesError && categories.length === 0 ? (
+                <View>
+                  <Text style={styles.categoryError}>{categoriesError}</Text>
+                  <TouchableOpacity
+                    style={styles.categoryRetryButton}
+                    onPress={() => loadCategories()}
+                  >
+                    <Text style={styles.categoryRetryText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : categories.length === 0 ? (
+                <Text style={styles.categoryHelper}>
+                  No categories yet. Add one below.
+                </Text>
+              ) : (
+                <View style={styles.categorySelector}>
+                  <Text style={styles.categoryInputLabel}>
+                    Select a marketplace category
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.categoryPickerButton}
+                    onPress={() => setCategoryPickerVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      selectedCategory
+                        ? `Selected category: ${selectedCategory.name}. Choose another category`
+                        : "Choose a marketplace category"
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.categoryPickerText,
+                        !selectedCategory && styles.categoryPickerPlaceholder,
+                      ]}
+                    >
+                      {selectedCategory?.name || "Select a category"}
+                    </Text>
+                    <Text style={styles.categoryPickerChevron}>⌄</Text>
+                  </TouchableOpacity>
+                  {selectedCategory ? (
+                    <Text style={styles.categoryHelper}>
+                      Selected: {selectedCategory.name}
+                    </Text>
+                  ) : (
+                    <Text style={styles.categoryHelper}>
+                      Search the list and choose a category to view it.
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {!!categoriesError && categories.length > 0 ? (
+                <Text style={styles.categoryError}>{categoriesError}</Text>
+              ) : null}
+
+              {!!categoryMessage ? (
+                <Text style={styles.categorySuccess}>{categoryMessage}</Text>
+              ) : null}
+
+              <Text style={styles.categoryInputLabel}>Add a category</Text>
+              <View style={styles.categoryForm}>
+                <TextInput
+                  style={styles.categoryInput}
+                  value={categoryName}
+                  onChangeText={setCategoryName}
+                  placeholder="e.g. Jewelry"
+                  placeholderTextColor="#899389"
+                  maxLength={100}
+                  editable={!savingCategory}
+                  returnKeyType="done"
+                  onSubmitEditing={handleCreateCategory}
+                  accessibilityLabel="New category name"
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.categoryAddButton,
+                    savingCategory && styles.disabledButton,
+                  ]}
+                  onPress={handleCreateCategory}
+                  disabled={savingCategory}
+                  accessibilityRole="button"
+                >
+                  {savingCategory ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.categoryAddButtonText}>Add</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -348,6 +526,108 @@ export default function AdminDashboardScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={categoryPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setCategoryPickerVisible(false);
+          setCategorySearch("");
+        }}
+      >
+        <Pressable
+          style={styles.categoryModalBackdrop}
+          onPress={() => {
+            setCategoryPickerVisible(false);
+            setCategorySearch("");
+          }}
+        >
+          <Pressable
+            style={styles.categoryModal}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={styles.categoryModalHeader}>
+              <View>
+                <Text style={styles.categoryModalTitle}>
+                  Choose category
+                </Text>
+                <Text style={styles.categoryModalSubtitle}>
+                  Search or select a marketplace category.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setCategoryPickerVisible(false);
+                  setCategorySearch("");
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Close category picker"
+                hitSlop={10}
+              >
+                <Text style={styles.categoryModalClose}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.categorySearchInput}
+              placeholder="Search categories"
+              placeholderTextColor="#899389"
+              value={categorySearch}
+              onChangeText={setCategorySearch}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Search categories"
+            />
+
+            <ScrollView
+              style={styles.categoryOptions}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              {filteredCategories.length === 0 ? (
+                <Text style={styles.categoryEmptyText}>
+                  No matching categories.
+                </Text>
+              ) : (
+                filteredCategories.map((category) => {
+                  const isSelected =
+                    Number(selectedCategoryId) === Number(category.id);
+
+                  return (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={[
+                        styles.categoryOption,
+                        isSelected && styles.categoryOptionSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedCategoryId(category.id);
+                        setCategoryPickerVisible(false);
+                        setCategorySearch("");
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryOptionText,
+                          isSelected && styles.categoryOptionTextSelected,
+                        ]}
+                      >
+                        {category.name}
+                      </Text>
+                      {isSelected ? (
+                        <Text style={styles.categoryCheck}>✓</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -387,18 +667,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 2,
     marginTop: 3,
-  },
-  logoutButton: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E2E6DD",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 12,
-  },
-  logoutText: {
-    color: "#245B43",
-    fontWeight: "800",
   },
   welcomeSection: {
     backgroundColor: "#245B43",
@@ -495,6 +763,208 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 6,
   },
+  categoryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBE3",
+    padding: 16,
+    marginBottom: 24,
+  },
+  categoryCardTitle: {
+    color: "#263D2D",
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
+  categoryLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingVertical: 8,
+  },
+  categoryHelper: {
+    color: "#758173",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  categorySelector: {
+    gap: 8,
+  },
+  categoryPickerButton: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#D9E0DA",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 13,
+  },
+  categoryPickerText: {
+    color: "#263D2D",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  categoryPickerPlaceholder: {
+    color: "#899389",
+    fontWeight: "400",
+  },
+  categoryPickerChevron: {
+    color: "#245B43",
+    fontSize: 22,
+    lineHeight: 24,
+  },
+  categoryModalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 18,
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+  },
+  categoryModal: {
+    width: "100%",
+    maxWidth: 480,
+    maxHeight: "82%",
+    alignSelf: "center",
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    padding: 18,
+    gap: 12,
+  },
+  categoryModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  categoryModalTitle: {
+    color: "#263D2D",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  categoryModalSubtitle: {
+    color: "#758173",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  categoryModalClose: {
+    color: "#52645A",
+    fontSize: 27,
+    lineHeight: 28,
+    paddingHorizontal: 4,
+  },
+  categorySearchInput: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: "#D9E0DA",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    color: "#263D2D",
+    fontSize: 14,
+  },
+  categoryOptions: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  categoryOption: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "#EDF0EB",
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  categoryOptionSelected: {
+    backgroundColor: "#F0F5EF",
+    borderRadius: 8,
+  },
+  categoryOptionText: {
+    color: "#30463A",
+    fontSize: 14,
+  },
+  categoryOptionTextSelected: {
+    color: "#245B43",
+    fontWeight: "800",
+  },
+  categoryCheck: {
+    color: "#245B43",
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  categoryEmptyText: {
+    color: "#758173",
+    fontSize: 13,
+    paddingVertical: 18,
+    textAlign: "center",
+  },
+  categoryError: {
+    color: "#A33C2D",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  categorySuccess: {
+    color: "#245B43",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 9,
+  },
+  categoryRetryButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#245B43",
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  categoryRetryText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  categoryInputLabel: {
+    color: "#263D2D",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  categoryForm: {
+    flexDirection: "row",
+    gap: 9,
+  },
+  categoryInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: "#D9E0DA",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    color: "#263D2D",
+    fontSize: 14,
+  },
+  categoryAddButton: {
+    minWidth: 74,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#245B43",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+  },
+  categoryAddButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
   loadingContainer: {
     alignItems: "center",
     paddingVertical: 50,
@@ -547,5 +1017,3 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-
-

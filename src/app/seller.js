@@ -6,7 +6,9 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Platform,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -17,12 +19,14 @@ import {
 } from "react-native";
 import { Redirect, router } from "expo-router";
 import { useAuth } from "../context/AuthContext";
+import AccountMenu from "../components/AccountMenu";
 
 import {
   fetchCategories,
   fetchSellerProducts,
   createSellerProduct,
   fetchSellerOrders,
+  fetchSellerReviews,
   decideSellerOrder,
   markSellerOrderShipped,
   respondToReturnRequest,
@@ -85,22 +89,27 @@ function getStatusStyle(status) {
 }
 
 export default function SellerDashboard() {
-  const { user, isLoading, logout } = useAuth();
+  const { user, isLoading } = useAuth();
 
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [reviews, setReviews] = useState([]);
 
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [processingOrderId, setProcessingOrderId] = useState(null);
   const [shipmentDetails, setShipmentDetails] = useState({});
 
   const [pageError, setPageError] = useState("");
   const [orderError, setOrderError] = useState("");
+  const [reviewError, setReviewError] = useState("");
   const [formError, setFormError] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
   const [activeSection, setActiveSection] = useState("home");
 
   const [name, setName] = useState("");
@@ -109,6 +118,10 @@ export default function SellerDashboard() {
   const [shippingFee, setShippingFee] = useState("0");
   const [stock, setStock] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
+  const [hasVariations, setHasVariations] = useState(false);
+  const [variationRows, setVariationRows] = useState([
+    { key: "variation-1", size: "", color: "", price: "", stock: "" },
+  ]);
 
   const [deliveryOriginBarangay, setDeliveryOriginBarangay] = useState("");
   const [deliveryOriginMunicipality, setDeliveryOriginMunicipality] =
@@ -166,13 +179,27 @@ export default function SellerDashboard() {
     }
   }, []);
 
+  const loadSellerReviews = useCallback(async () => {
+    setLoadingReviews(true);
+    setReviewError("");
+
+    try {
+      const reviewData = await fetchSellerReviews();
+      setReviews(reviewData || []);
+    } catch (error) {
+      setReviewError(error.message || "Unable to load your reviews.");
+    } finally {
+      setLoadingReviews(false);
+    }
+  }, []);
+
   const refreshSellerDashboard = useCallback(async () => {
     await Promise.all([loadSellerData(), loadSellerOrders()]);
   }, [loadSellerData, loadSellerOrders]);
 
   useEffect(() => {
     if (!isLoading && user?.role === "seller") {
-      refreshSellerDashboard();
+      Promise.resolve().then(refreshSellerDashboard);
     }
   }, [isLoading, user, refreshSellerDashboard]);
 
@@ -239,6 +266,10 @@ export default function SellerDashboard() {
       loadSellerOrders();
     }
 
+    if (section === "reviews") {
+      loadSellerReviews();
+    }
+
     if (section === "addProduct") {
       loadSellerData();
     }
@@ -292,7 +323,10 @@ async function handleCreateProduct() {
     return;
   }
 
-  if (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+  if (
+    !hasVariations &&
+    (!price.trim() || !Number.isFinite(parsedPrice) || parsedPrice <= 0)
+  ) {
     setFormError("Price must be a number greater than zero.");
     return;
   }
@@ -308,12 +342,81 @@ async function handleCreateProduct() {
   }
 
   if (
-    !stock.trim() ||
-    !Number.isInteger(parsedStock) ||
-    parsedStock < 0
+    !hasVariations &&
+    (!stock.trim() || !Number.isInteger(parsedStock) || parsedStock < 0)
   ) {
     setFormError("Stock must be a whole number of zero or more.");
     return;
+  }
+
+  const productVariants = hasVariations
+    ? variationRows.map((variant) => ({
+        size: variant.size.trim(),
+        color: variant.color.trim(),
+        price: Number(variant.price),
+        stock: Number(variant.stock),
+      }))
+    : [];
+
+  if (hasVariations) {
+    const seenOptions = new Set();
+    let totalVariantStock = 0;
+    const hasSizes = productVariants.some((variant) => variant.size);
+    const hasColors = productVariants.some((variant) => variant.color);
+
+    if (productVariants.length === 0) {
+      setFormError("Add at least one product variation.");
+      return;
+    }
+
+    if (
+      productVariants.some(
+        (variant) =>
+          Boolean(variant.size) !== hasSizes ||
+          Boolean(variant.color) !== hasColors
+      )
+    ) {
+      setFormError(
+        "Use the same variation fields for every option combination."
+      );
+      return;
+    }
+
+    for (const [index, variant] of productVariants.entries()) {
+      if (
+        (!variant.size && !variant.color) ||
+        !variationRows[index].price.trim() ||
+        !variationRows[index].stock.trim() ||
+        variant.size.length > 100 ||
+        variant.color.length > 100 ||
+        !Number.isFinite(variant.price) ||
+        variant.price <= 0 ||
+        variant.price > 99999999.99 ||
+        !Number.isInteger(variant.stock) ||
+        variant.stock < 0 ||
+        variant.stock > 2147483647
+      ) {
+        setFormError(
+          `Variation ${index + 1} needs a size or color, a valid price, and whole-number stock.`
+        );
+        return;
+      }
+
+      const optionKey =
+        `${variant.size.toLowerCase()}\u0000${variant.color.toLowerCase()}`;
+      if (seenOptions.has(optionKey)) {
+        setFormError("Each size and color combination must be unique.");
+        return;
+      }
+
+      seenOptions.add(optionKey);
+      totalVariantStock += variant.stock;
+    }
+
+    if (totalVariantStock > 2147483647) {
+      setFormError("The combined variation stock is too large.");
+      return;
+    }
   }
 
   if (categories.length > 0 && selectedCategory === null) {
@@ -396,9 +499,20 @@ async function handleCreateProduct() {
 
     formData.append("name", trimmedName);
     formData.append("description", trimmedDescription);
-    formData.append("price", String(parsedPrice));
+    const variantPrices = productVariants.map((variant) => variant.price);
+    const productPrice = hasVariations
+      ? Math.min(...variantPrices)
+      : parsedPrice;
+    const productStock = hasVariations
+      ? productVariants.reduce((total, variant) => total + variant.stock, 0)
+      : parsedStock;
+
+    formData.append("price", String(productPrice));
     formData.append("shipping_fee", String(parsedShippingFee));
-    formData.append("stock", String(parsedStock));
+    formData.append("stock", String(productStock));
+    if (hasVariations) {
+      formData.append("variants", JSON.stringify(productVariants));
+    }
 
     if (selectedCategory !== null) {
       formData.append("category_id", String(selectedCategory));
@@ -430,6 +544,10 @@ async function handleCreateProduct() {
     setPrice("");
     setShippingFee("0");
     setStock("");
+    setHasVariations(false);
+    setVariationRows([
+      { key: `variation-${Date.now()}`, size: "", color: "", price: "", stock: "" },
+    ]);
     setSelectedCategory(null);
     setSelectedImage(null);
     setFormError("");
@@ -541,11 +659,6 @@ async function handleCreateProduct() {
     );
   }
 
-  async function handleLogout() {
-    await logout();
-    router.replace("/login");
-  }
-
   if (isLoading) {
     return (
       <SafeAreaView style={styles.center}>
@@ -563,20 +676,32 @@ async function handleCreateProduct() {
     return null;
   }
 
+  const selectedCategoryName = categories.find(
+    (category) => Number(category.id) === Number(selectedCategory)
+  )?.name;
+  const filteredCategories = categories.filter((category) =>
+    String(category.name || "")
+      .toLowerCase()
+      .includes(categorySearch.trim().toLowerCase())
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.brandRow}>
-          <Image
-            source={require("../../assets/likhalocal-logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-            accessibilityLabel="LikhaLocal logo"
-          />
-          <Text style={styles.brand}>LikhaLocal</Text>
+        <View style={styles.dashboardHeader}>
+          <View style={styles.brandRow}>
+            <Image
+              source={require("../../assets/likhalocal-logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityLabel="LikhaLocal logo"
+            />
+            <Text style={styles.brand}>LikhaLocal</Text>
+          </View>
+          <AccountMenu />
         </View>
         <Text style={styles.heading}>Seller Dashboard</Text>
         <Text style={styles.subtitle}>
@@ -630,6 +755,24 @@ async function handleCreateProduct() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={[styles.navigationCard, styles.reviewsCard]}
+                onPress={() => openSection("reviews")}
+                activeOpacity={0.8}
+              >
+                <View style={styles.iconCircle}>
+                  <Text style={styles.navigationIcon}>★</Text>
+                </View>
+                <Text style={styles.navigationTitle}>Customer Reviews</Text>
+                <Text
+                  style={styles.navigationDescription}
+                  numberOfLines={3}
+                >
+                  Read feedback customers leave for your products.
+                </Text>
+                <Text style={styles.navigationLink}>View reviews →</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[styles.navigationCard, styles.deliveryOriginCard]}
                 onPress={() => openSection("deliveryOrigin")}
                 activeOpacity={0.8}
@@ -642,7 +785,7 @@ async function handleCreateProduct() {
                   style={styles.navigationDescription}
                   numberOfLines={3}
                 >
-                  Set your shop's delivery location.
+                  Set your shop&apos;s delivery location.
                 </Text>
                 <Text style={styles.navigationLink}>Set location →</Text>
               </TouchableOpacity>
@@ -683,7 +826,7 @@ async function handleCreateProduct() {
                 <ActivityIndicator size="large" color="#245B43" />
               ) : (
                 <>
-                  <Text style={styles.label}>Seller's Barangay *</Text>
+                  <Text style={styles.label}>Seller&apos;s Barangay *</Text>
                   <TextInput
                     style={styles.input}
                     value={deliveryOriginBarangay}
@@ -821,15 +964,147 @@ async function handleCreateProduct() {
                 </Text>
               )}
 
-              <Text style={styles.label}>Price (₱) *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 150.00"
-                value={price}
-                onChangeText={setPrice}
-                keyboardType="decimal-pad"
-                editable={!savingProduct}
-              />
+              <TouchableOpacity
+                style={styles.variationToggle}
+                onPress={() => setHasVariations((enabled) => !enabled)}
+                disabled={savingProduct}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: hasVariations }}
+              >
+                <Text style={styles.variationToggleText}>
+                  {hasVariations
+                    ? "✓ This product has size/color variations"
+                    : "＋ Add size/color variations"}
+                </Text>
+              </TouchableOpacity>
+
+              {hasVariations ? (
+                <View style={styles.variationEditor}>
+                  <Text style={styles.note}>
+                    Add each available size and/or color combination with its
+                    own price and stock.
+                  </Text>
+
+                  {variationRows.map((variant, index) => (
+                    <View key={variant.key} style={styles.variationRow}>
+                      <Text style={styles.variationHeading}>
+                        Variation {index + 1}
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Size (e.g. Small)"
+                        value={variant.size}
+                        onChangeText={(value) =>
+                          setVariationRows((rows) =>
+                            rows.map((row) =>
+                              row.key === variant.key
+                                ? { ...row, size: value }
+                                : row
+                            )
+                          )
+                        }
+                        maxLength={100}
+                        editable={!savingProduct}
+                      />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Color (e.g. Red)"
+                        value={variant.color}
+                        onChangeText={(value) =>
+                          setVariationRows((rows) =>
+                            rows.map((row) =>
+                              row.key === variant.key
+                                ? { ...row, color: value }
+                                : row
+                            )
+                          )
+                        }
+                        maxLength={100}
+                        editable={!savingProduct}
+                      />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Price (₱)"
+                        value={variant.price}
+                        onChangeText={(value) =>
+                          setVariationRows((rows) =>
+                            rows.map((row) =>
+                              row.key === variant.key
+                                ? { ...row, price: value }
+                                : row
+                            )
+                          )
+                        }
+                        keyboardType="decimal-pad"
+                        editable={!savingProduct}
+                      />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Stock quantity"
+                        value={variant.stock}
+                        onChangeText={(value) =>
+                          setVariationRows((rows) =>
+                            rows.map((row) =>
+                              row.key === variant.key
+                                ? { ...row, stock: value }
+                                : row
+                            )
+                          )
+                        }
+                        keyboardType="number-pad"
+                        editable={!savingProduct}
+                      />
+                      {variationRows.length > 1 ? (
+                        <TouchableOpacity
+                          onPress={() =>
+                            setVariationRows((rows) =>
+                              rows.filter((row) => row.key !== variant.key)
+                            )
+                          }
+                          disabled={savingProduct}
+                        >
+                          <Text style={styles.removeImageText}>
+                            Remove variation
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  ))}
+
+                  <TouchableOpacity
+                    style={styles.addVariationButton}
+                    onPress={() =>
+                      setVariationRows((rows) => [
+                        ...rows,
+                        {
+                          key: `variation-${Date.now()}-${rows.length}`,
+                          size: "",
+                          color: "",
+                          price: "",
+                          stock: "",
+                        },
+                      ])
+                    }
+                    disabled={savingProduct || variationRows.length >= 100}
+                  >
+                    <Text style={styles.addVariationText}>
+                      + Add another variation
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.label}>Price (₱) *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 150.00"
+                    value={price}
+                    onChangeText={setPrice}
+                    keyboardType="decimal-pad"
+                    editable={!savingProduct}
+                  />
+                </>
+              )}
 
               <Text style={styles.label}>Shipping fee (₱) *</Text>
               <TextInput
@@ -846,15 +1121,19 @@ async function handleCreateProduct() {
                 checkout charges only the highest product shipping fee once.
               </Text>
 
-              <Text style={styles.label}>Stock quantity *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 20"
-                value={stock}
-                onChangeText={setStock}
-                keyboardType="number-pad"
-                editable={!savingProduct}
-              />
+              {!hasVariations ? (
+                <>
+                  <Text style={styles.label}>Stock quantity *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 20"
+                    value={stock}
+                    onChangeText={setStock}
+                    keyboardType="number-pad"
+                    editable={!savingProduct}
+                  />
+                </>
+              ) : null}
 
               <Text style={styles.label}>Category *</Text>
 
@@ -866,30 +1145,30 @@ async function handleCreateProduct() {
                   successfully.
                 </Text>
               ) : (
-                <View style={styles.categoryContainer}>
-                  {categories.map((category) => (
-                    <TouchableOpacity
-                      key={category.id}
-                      style={[
-                        styles.categoryButton,
-                        Number(selectedCategory) === Number(category.id) &&
-                          styles.selectedCategoryButton,
-                      ]}
-                      onPress={() => setSelectedCategory(category.id)}
-                      disabled={savingProduct}
-                    >
-                      <Text
-                        style={[
-                          styles.categoryText,
-                          Number(selectedCategory) === Number(category.id) &&
-                            styles.selectedCategoryText,
-                        ]}
-                      >
-                        {category.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.categoryPickerButton,
+                    savingProduct && styles.disabledButton,
+                  ]}
+                  onPress={() => setCategoryPickerVisible(true)}
+                  disabled={savingProduct}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    selectedCategoryName
+                      ? `Category: ${selectedCategoryName}. Change category`
+                      : "Choose a product category"
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.categoryPickerText,
+                      !selectedCategoryName && styles.categoryPlaceholder,
+                    ]}
+                  >
+                    {selectedCategoryName || "Select a category"}
+                  </Text>
+                  <Text style={styles.categoryPickerChevron}>⌄</Text>
+                </TouchableOpacity>
               )}
 
               {formError ? (
@@ -985,6 +1264,20 @@ async function handleCreateProduct() {
                       <Text style={styles.productDetail}>
                         Stock: {product.stock}
                       </Text>
+                      {product.variants?.length ? (
+                        <Text style={styles.productDetail}>
+                          Variations:{" "}
+                          {product.variants
+                            .map((variant) => {
+                              const options = [
+                                variant.size,
+                                variant.color,
+                              ].filter(Boolean);
+                              return `${options.join(" / ")} — ${formatMoney(variant.price)} (${variant.stock} in stock)`;
+                            })
+                            .join(", ")}
+                        </Text>
+                      ) : null}
 
                       <View style={styles.statusContainer}>
                         <Text style={styles.productDetail}>Status: </Text>
@@ -1141,6 +1434,11 @@ async function handleCreateProduct() {
                             <Text style={styles.orderProductName}>
                               {item.productName || "Product"}
                             </Text>
+                            {item.variantDetails ? (
+                              <Text style={styles.orderDetail}>
+                                {item.variantDetails}
+                              </Text>
+                            ) : null}
 
                             <View style={styles.orderProductRow}>
                               <Text style={styles.orderDetail}>
@@ -1377,28 +1675,209 @@ async function handleCreateProduct() {
               <Text style={styles.note}>
                 The checkout total may include products from other sellers.
                 The status displayed at the top represents your decision
-                for this seller's order.
+                for this seller&apos;s order.
               </Text>
             </View>
           </>
         )}
 
-        <TouchableOpacity
-          style={styles.profileButton}
-          onPress={() => router.push("/profile")}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.buttonText}>My Profile</Text>
-        </TouchableOpacity>
+        {activeSection === "reviews" && (
+          <>
+            <View style={styles.sectionIntro}>
+              <Text style={styles.sectionHeading}>Customer Reviews</Text>
+              <Text style={styles.description}>
+                Feedback customers have left for your products.
+              </Text>
+            </View>
 
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.buttonText}>Log Out</Text>
-        </TouchableOpacity>
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.cardTitle}>Product Feedback</Text>
+                <TouchableOpacity
+                  onPress={loadSellerReviews}
+                  disabled={loadingReviews}
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh customer reviews"
+                >
+                  <Text style={styles.refreshText}>
+                    {loadingReviews ? "Loading..." : "Refresh"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {loadingReviews ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="large" color="#245B43" />
+                  <Text style={styles.description}>
+                    Loading customer reviews...
+                  </Text>
+                </View>
+              ) : reviewError ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.errorText}>{reviewError}</Text>
+                  <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={loadSellerReviews}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.refreshText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : reviews.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyIcon}>★</Text>
+                  <Text style={styles.emptyTitle}>No reviews yet</Text>
+                  <Text style={styles.description}>
+                    Reviews for your products will appear here after customers
+                    confirm delivery and submit feedback.
+                  </Text>
+                </View>
+              ) : (
+                reviews.map((review) => (
+                  <View key={review.id} style={styles.reviewCard}>
+                    <View style={styles.reviewHeader}>
+                      <View style={styles.orderHeadingInfo}>
+                        <Text style={styles.reviewProductName}>
+                          {review.productName || "Product"}
+                        </Text>
+                        <Text style={styles.orderDate}>
+                          Order #{review.orderId} · {formatDate(review.createdAt)}
+                        </Text>
+                      </View>
+                      <Text
+                        style={styles.reviewRating}
+                        accessibilityLabel={`${review.rating} out of 5 stars`}
+                      >
+                        {"★".repeat(
+                          Math.max(0, Math.min(5, Number(review.rating) || 0))
+                        )}
+                        <Text style={styles.reviewRatingMuted}>
+                          {"★".repeat(
+                            5 -
+                              Math.max(
+                                0,
+                                Math.min(5, Number(review.rating) || 0)
+                              )
+                          )}
+                        </Text>
+                      </Text>
+                    </View>
+                    <Text style={styles.reviewCustomer}>
+                      Reviewed by {review.customerName || "Customer"}
+                    </Text>
+                    {review.comment ? (
+                      <Text style={styles.reviewComment}>{review.comment}</Text>
+                    ) : (
+                      <Text style={styles.note}>No written comment.</Text>
+                    )}
+                  </View>
+                ))
+              )}
+            </View>
+          </>
+        )}
+
       </ScrollView>
+
+      <Modal
+        visible={categoryPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setCategoryPickerVisible(false);
+          setCategorySearch("");
+        }}
+      >
+        <Pressable
+          style={styles.categoryModalBackdrop}
+          onPress={() => {
+            setCategoryPickerVisible(false);
+            setCategorySearch("");
+          }}
+        >
+          <Pressable
+            style={styles.categoryModal}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <View style={styles.categoryModalHeader}>
+              <View>
+                <Text style={styles.categoryModalTitle}>Choose category</Text>
+                <Text style={styles.categoryModalSubtitle}>
+                  Search or select a product category.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setCategoryPickerVisible(false);
+                  setCategorySearch("");
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Close category picker"
+                hitSlop={10}
+              >
+                <Text style={styles.categoryModalClose}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.categorySearchInput}
+              placeholder="Search categories"
+              placeholderTextColor="#899389"
+              value={categorySearch}
+              onChangeText={setCategorySearch}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Search categories"
+            />
+
+            <ScrollView
+              style={styles.categoryOptions}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              {filteredCategories.length === 0 ? (
+                <Text style={styles.categoryEmptyText}>
+                  No matching categories.
+                </Text>
+              ) : (
+                filteredCategories.map((category) => {
+                  const isSelected =
+                    Number(selectedCategory) === Number(category.id);
+
+                  return (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={[
+                        styles.categoryOption,
+                        isSelected && styles.categoryOptionSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedCategory(category.id);
+                        setCategoryPickerVisible(false);
+                        setCategorySearch("");
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: isSelected }}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryOptionText,
+                          isSelected && styles.categoryOptionTextSelected,
+                        ]}
+                      >
+                        {category.name}
+                      </Text>
+                      {isSelected ? (
+                        <Text style={styles.categoryCheck}>✓</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1418,6 +1897,11 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 36,
     gap: 16,
+  },
+  dashboardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   brandRow: {
     flexDirection: "row",
@@ -1480,6 +1964,10 @@ const styles = StyleSheet.create({
   myOrdersCard: {
     backgroundColor: "#FBEEDC",
     borderColor: "#EBD4B1",
+  },
+  reviewsCard: {
+    backgroundColor: "#F7EEF8",
+    borderColor: "#E4D2E8",
   },
   deliveryOriginCard: {
     backgroundColor: "#E9EEF9",
@@ -1613,29 +2101,151 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontWeight: "600",
   },
-  categoryContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+  variationToggle: {
+    borderWidth: 1,
+    borderColor: "#B8C9BC",
+    borderRadius: 10,
+    backgroundColor: "#F5F8F3",
+    padding: 13,
   },
-  categoryButton: {
-    paddingVertical: 9,
-    paddingHorizontal: 13,
-    borderRadius: 20,
+  variationToggleText: {
+    color: "#245B43",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  variationEditor: {
+    gap: 12,
+  },
+  variationRow: {
+    borderWidth: 1,
+    borderColor: "#D4DED5",
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+    backgroundColor: "#F8FAF7",
+  },
+  variationHeading: {
+    color: "#183D2D",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  addVariationButton: {
+    alignItems: "center",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#86A08C",
+    borderRadius: 10,
+    padding: 12,
+  },
+  addVariationText: {
+    color: "#245B43",
+    fontWeight: "700",
+  },
+  categoryPickerButton: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#B8C9BC",
     backgroundColor: "#FFFFFF",
   },
-  selectedCategoryButton: {
-    backgroundColor: "#245B43",
-    borderColor: "#245B43",
-  },
-  categoryText: {
-    color: "#245B43",
+  categoryPickerText: {
+    color: "#183D2D",
+    fontSize: 15,
     fontWeight: "600",
   },
-  selectedCategoryText: {
-    color: "#FFFFFF",
+  categoryPlaceholder: {
+    color: "#899389",
+    fontWeight: "400",
+  },
+  categoryPickerChevron: {
+    color: "#245B43",
+    fontSize: 22,
+    lineHeight: 22,
+  },
+  categoryModalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.42)",
+  },
+  categoryModal: {
+    width: "100%",
+    maxWidth: 480,
+    maxHeight: "80%",
+    alignSelf: "center",
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+  },
+  categoryModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  categoryModalTitle: {
+    color: "#214D39",
+    fontSize: 19,
+    fontWeight: "800",
+  },
+  categoryModalSubtitle: {
+    color: "#758173",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  categoryModalClose: {
+    color: "#54745B",
+    fontSize: 28,
+    lineHeight: 30,
+    paddingHorizontal: 4,
+  },
+  categorySearchInput: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: "#D9E0DA",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    color: "#183D2D",
+    fontSize: 14,
+  },
+  categoryOptions: {
+    flexShrink: 1,
+  },
+  categoryOption: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1EC",
+  },
+  categoryOptionSelected: {
+    backgroundColor: "#F0F6F1",
+  },
+  categoryOptionText: {
+    color: "#344A39",
+    fontSize: 14,
+  },
+  categoryOptionTextSelected: {
+    color: "#245B43",
+    fontWeight: "700",
+  },
+  categoryCheck: {
+    color: "#245B43",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  categoryEmptyText: {
+    color: "#758173",
+    textAlign: "center",
+    paddingVertical: 22,
   },
   primaryButton: {
     backgroundColor: "#245B43",
@@ -1651,19 +2261,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-  },
-  profileButton: {
-    backgroundColor: "#245B43",
-    padding: 15,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 4,
-  },
-  logoutButton: {
-    backgroundColor: "#8B3A3A",
-    padding: 15,
-    borderRadius: 10,
-    alignItems: "center",
   },
   buttonText: {
     color: "#FFFFFF",
@@ -1757,6 +2354,44 @@ const styles = StyleSheet.create({
     color: "#183D2D",
     fontSize: 17,
     fontWeight: "800",
+  },
+  reviewCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDE6DE",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+    gap: 8,
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  reviewProductName: {
+    color: "#183D2D",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  reviewRating: {
+    color: "#D6951E",
+    fontSize: 18,
+    letterSpacing: 1,
+  },
+  reviewRatingMuted: {
+    color: "#D8DED8",
+  },
+  reviewCustomer: {
+    color: "#52645A",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  reviewComment: {
+    color: "#30463A",
+    fontSize: 14,
+    lineHeight: 21,
   },
 
   // My Orders cards

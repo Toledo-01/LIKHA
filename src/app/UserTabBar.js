@@ -16,7 +16,6 @@ const customerTabs = [
   { name: "Cart", icon: "🛍️", route: "/cart" },
   { name: "Orders", icon: "▤", route: "/orders" },
   { name: "Favorites", icon: "♡", route: "/favorites" },
-  { name: "Profile", icon: "♙", route: "/profile" },
 ];
 
 export default function UserTabBar() {

@@ -30,7 +30,7 @@ export default function CartScreen() {
       const confirmed = window.confirm(
         `Remove "${item.name}" from your cart?`
       );
-      if (confirmed) removeFromCart(item.id);
+      if (confirmed) removeFromCart(item.cartKey);
       return;
     }
 
@@ -39,7 +39,7 @@ export default function CartScreen() {
       {
         text: "Remove",
         style: "destructive",
-        onPress: () => removeFromCart(item.id),
+        onPress: () => removeFromCart(item.cartKey),
       },
     ]);
   }
@@ -109,7 +109,7 @@ export default function CartScreen() {
         ) : (
           <>
             {cartItems.map((item) => (
-              <View key={item.id} style={styles.itemCard}>
+              <View key={item.cartKey} style={styles.itemCard}>
                 <View
                   style={[
                     styles.productImage,
@@ -127,6 +127,9 @@ export default function CartScreen() {
                   </Text>
 
                   <Text style={styles.productName}>{item.name}</Text>
+                  {item.variantDetails ? (
+                    <Text style={styles.seller}>{item.variantDetails}</Text>
+                  ) : null}
                   <Text style={styles.seller}>
                     {item.seller || "Local Seller"}
                   </Text>
@@ -140,7 +143,7 @@ export default function CartScreen() {
                         style={styles.quantityButton}
                         disabled={item.quantity <= 1}
                         onPress={() =>
-                          updateQuantity(item.id, item.quantity - 1)
+                          updateQuantity(item.cartKey, item.quantity - 1)
                         }
                       >
                         <Text
@@ -164,7 +167,7 @@ export default function CartScreen() {
                           item.quantity >= Number(item.stock)
                         }
                         onPress={() =>
-                          updateQuantity(item.id, item.quantity + 1)
+                          updateQuantity(item.cartKey, item.quantity + 1)
                         }
                       >
                         <Text style={styles.quantityButtonText}>+</Text>

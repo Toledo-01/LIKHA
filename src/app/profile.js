@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,14 +14,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
 import { useAuth } from "../context/AuthContext";
-import { fetchMyActivity } from "../services/auth";
+import AccountMenu from "../components/AccountMenu";
 
 export default function ProfileScreen() {
   const {
     user,
-    logout,
     updateProfile,
     updateProfilePicture,
     isLoading,
@@ -33,40 +32,14 @@ export default function ProfileScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [activities, setActivities] = useState([]);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [activityError, setActivityError] = useState("");
-
-  const loadActivity = useCallback(async () => {
-    setActivityLoading(true);
-    setActivityError("");
-
-    try {
-      setActivities(await fetchMyActivity());
-    } catch (error) {
-      console.error("Could not load activity history:", error);
-      setActivityError(
-        error.message || "Could not load your activity history."
-      );
-    } finally {
-      setActivityLoading(false);
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (user && !isLoading) {
-        loadActivity();
-      }
-    }, [isLoading, loadActivity, user])
-  );
 
   // Load the current user's information into the form.
   useEffect(() => {
+    // This effect intentionally resets editable fields when the signed-in user changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFullName(user?.full_name || user?.fullName || user?.name || "");
     setPhone(user?.phone || "");
     setAddress(user?.address || "");
@@ -245,61 +218,6 @@ export default function ProfileScreen() {
     }
   }
 
-  // Clear the saved session and return to login.
-  async function handleLogout() {
-    if (isLoggingOut) return;
-
-    try {
-      setIsLoggingOut(true);
-
-      await logout();
-
-      router.replace("/login");
-    } catch (error) {
-      console.error("Logout failed:", error);
-
-      showMessage(
-        "Logout failed",
-        "We couldn't log you out. Please try again."
-      );
-    } finally {
-      setIsLoggingOut(false);
-    }
-  }
-
-  // Confirm logout using the appropriate platform dialog.
-  function confirmLogout() {
-    if (isLoggingOut) return;
-
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(
-        "Are you sure you want to log out of LikhaLocal?"
-      );
-
-      if (confirmed) {
-        handleLogout();
-      }
-
-      return;
-    }
-
-    Alert.alert(
-      "Log out",
-      "Are you sure you want to log out of LikhaLocal?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Log out",
-          style: "destructive",
-          onPress: handleLogout,
-        },
-      ]
-    );
-  }
-
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -318,7 +236,7 @@ export default function ProfileScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingContainer}>
           <Text style={styles.sectionTitle}>
-            You're not logged in
+            You&apos;re not logged in
           </Text>
 
           <Text style={styles.messageDescription}>
@@ -374,7 +292,7 @@ export default function ProfileScreen() {
 
           <Text style={styles.headerTitle}>My Profile</Text>
 
-          <View style={styles.headerSpacer} />
+          <AccountMenu />
         </View>
 
         {/* Profile introduction */}
@@ -607,77 +525,21 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.activityHeader}>
-            <View style={styles.activityHeading}>
-              <Text style={styles.sectionTitle}>Recent Activity</Text>
-              <Text style={styles.activityDescription}>
-                Recent actions from your {role} account.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              onPress={loadActivity}
-              disabled={activityLoading}
-              accessibilityRole="button"
-              accessibilityLabel="Refresh activity history"
-            >
-              <Text style={styles.activityRefresh}>
-                {activityLoading ? "Loading..." : "Refresh"}
-              </Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.activityLinkCard}
+          onPress={() => router.push("/activity-log")}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Open activity log"
+        >
+          <View style={styles.activityLinkCopy}>
+            <Text style={styles.activityLinkTitle}>Activity Log</Text>
+            <Text style={styles.activityLinkDescription}>
+              Review recent actions from your {role} account.
+            </Text>
           </View>
-
-          <View style={styles.activityCard}>
-            {activityLoading ? (
-              <View style={styles.activityState}>
-                <ActivityIndicator color="#245B43" />
-                <Text style={styles.activityStateText}>
-                  Loading your recent activity...
-                </Text>
-              </View>
-            ) : activityError ? (
-              <View style={styles.activityState}>
-                <Text style={styles.activityError}>
-                  {activityError}
-                </Text>
-                <TouchableOpacity
-                  style={styles.activityRetryButton}
-                  onPress={loadActivity}
-                  accessibilityRole="button"
-                  accessibilityLabel="Try loading activity history again"
-                >
-                  <Text style={styles.activityRetryText}>Try Again</Text>
-                </TouchableOpacity>
-              </View>
-            ) : activities.length === 0 ? (
-              <Text style={styles.activityStateText}>
-                Your recent actions will appear here.
-              </Text>
-            ) : (
-              activities.map((activity) => {
-                const timestamp = new Date(activity.created_at);
-                const dateLabel = Number.isNaN(timestamp.getTime())
-                  ? String(activity.created_at || "")
-                  : timestamp.toLocaleString();
-
-                return (
-                  <View key={String(activity.id)} style={styles.activityRow}>
-                    <View style={styles.activityDot} />
-                    <View style={styles.activityContent}>
-                      <Text style={styles.activitySummary}>
-                        {activity.summary}
-                      </Text>
-                      <Text style={styles.activityMeta}>
-                        {dateLabel}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })
-            )}
-          </View>
-        </View>
+          <Text style={styles.activityLinkArrow}>›</Text>
+        </TouchableOpacity>
 
         {/* Role-specific About section */}
         <View style={styles.messageCard}>
@@ -693,30 +555,6 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </View>
-
-        {/* Logout button */}
-        <TouchableOpacity
-          style={[
-            styles.logoutButton,
-            isLoggingOut && styles.logoutButtonDisabled,
-          ]}
-          onPress={confirmLogout}
-          disabled={isLoggingOut}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Log out of LikhaLocal"
-        >
-          {isLoggingOut ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <>
-              <Text style={styles.logoutIcon}>↪</Text>
-              <Text style={styles.logoutButtonText}>
-                Log Out
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
 
         <Text style={styles.footerText}>
           LikhaLocal · Made with local love 🇵🇭
@@ -774,9 +612,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "800",
     color: "#214D39",
-  },
-  headerSpacer: {
-    width: 42,
   },
   profileHero: {
     alignItems: "center",
@@ -873,89 +708,36 @@ const styles = StyleSheet.create({
     color: "#243E2D",
     marginBottom: 13,
   },
-  activityHeader: {
+  activityLinkCard: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 13,
-  },
-  activityHeading: {
-    flex: 1,
-  },
-  activityDescription: {
-    fontSize: 12,
-    color: "#758173",
-    marginTop: -7,
-  },
-  activityRefresh: {
-    color: "#245B43",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  activityCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 19,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
     borderWidth: 1,
     borderColor: "#EEEEE7",
+    marginBottom: 23,
   },
-  activityRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0E8",
-  },
-  activityDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "#5B8968",
-    marginTop: 5,
-    marginRight: 12,
-  },
-  activityContent: {
+  activityLinkCopy: {
     flex: 1,
   },
-  activitySummary: {
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-    color: "#2C4031",
+  activityLinkTitle: {
+    color: "#243E2D",
+    fontSize: 15,
+    fontWeight: "800",
   },
-  activityMeta: {
-    fontSize: 11,
-    color: "#899389",
-    marginTop: 4,
-  },
-  activityState: {
-    alignItems: "center",
-    paddingVertical: 20,
-  },
-  activityStateText: {
-    fontSize: 12,
+  activityLinkDescription: {
     color: "#758173",
-    textAlign: "center",
-    paddingVertical: 17,
-  },
-  activityError: {
     fontSize: 12,
-    color: "#B42318",
-    textAlign: "center",
-    marginBottom: 12,
+    marginTop: 5,
   },
-  activityRetryButton: {
-    backgroundColor: "#245B43",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  activityRetryText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
+  activityLinkArrow: {
+    color: "#245B43",
+    fontSize: 30,
+    lineHeight: 32,
+    marginLeft: 12,
   },
   infoCard: {
     backgroundColor: "#FFFFFF",
@@ -1086,13 +868,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 18,
     gap: 10,
-  },
-  logoutButtonDisabled: {
-    opacity: 0.7,
-  },
-  logoutIcon: {
-    fontSize: 21,
-    color: "#FFFFFF",
   },
   logoutButtonText: {
     fontSize: 15,

@@ -104,7 +104,7 @@ export default function StaffProductsScreen() {
       }
 
       setProducts(Array.isArray(data.products) ? data.products : []);
-    } catch (error) {
+    } catch (_error) {
       setProducts([]);
       setErrorMessage(
         "Cannot connect to the server. Check that your backend is running and your API address is correct."
@@ -290,8 +290,14 @@ export default function StaffProductsScreen() {
                   </Text>
 
                   <Text style={styles.productPrice}>
+                    {product.variants?.length ? "From " : ""}
                     {formatPrice(product.price)}
                   </Text>
+                  {product.variants?.length ? (
+                    <Text style={styles.tapHint}>
+                      {product.variants.length} size/color options
+                    </Text>
+                  ) : null}
 
                   <View
                     style={[

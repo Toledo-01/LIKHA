@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchProducts } from "../services/api";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
+import AccountMenu from "../components/AccountMenu";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
@@ -18,14 +19,6 @@ import {
 } from "react-native";
 
 const FAVORITES_KEY = "likhaLocalFavorites";
-
-const categories = [
-  { name: "All", icon: "✨" },
-  { name: "Food", icon: "🥭" },
-  { name: "Crafts", icon: "🧺" },
-  { name: "Fashion", icon: "👜" },
-  { name: "Home", icon: "🏡" },
-];
 
 function formatProducts(data) {
   return data.map((product) => {
@@ -56,7 +49,7 @@ function formatProducts(data) {
 
 export default function HomeScreen() {
   const { user, isLoading: authLoading } = useAuth();
-  const { cartCount, addToCart } = useCart();
+  const { cartCount } = useCart();
 
   const [products, setProducts] = useState([]);
   const [imageErrors, setImageErrors] = useState({});
@@ -182,17 +175,6 @@ export default function HomeScreen() {
     }
   }
 
-  // Buy Now: skip the cart screen and go straight to checkout with this one item.
-  // Sends "buyNowProductId" — the exact param name CheckoutScreen reads.
-  function handleBuyNow(product) {
-    router.push({
-      pathname: "/checkout",
-      params: {
-        buyNowProductId: String(product.id),
-      },
-    });
-  }
-
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -261,18 +243,21 @@ if (user.role === "seller") {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.bagButton}
-              onPress={() => router.push("/cart")}
-              accessibilityLabel="Open cart"
-            >
-              <Text style={styles.bagIcon}>🛍️</Text>
-              {cartCount > 0 && (
-                <View style={styles.cartBadge}>
-                  <Text style={styles.cartBadgeText}>{cartCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.bagButton}
+                onPress={() => router.push("/cart")}
+                accessibilityLabel="Open cart"
+              >
+                <Text style={styles.bagIcon}>🛍️</Text>
+                {cartCount > 0 && (
+                  <View style={styles.cartBadge}>
+                    <Text style={styles.cartBadgeText}>{cartCount}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <AccountMenu />
+            </View>
           </View>
 
           <View style={styles.hero}>
@@ -367,7 +352,7 @@ if (user.role === "seller") {
           ) : apiError ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
-              <Text style={styles.emptyTitle}>Couldn't load products</Text>
+              <Text style={styles.emptyTitle}>Couldn&apos;t load products</Text>
               <Text style={styles.emptyDescription}>{apiError}</Text>
               <TouchableOpacity
                 style={styles.resetButton}
@@ -455,31 +440,11 @@ if (user.role === "seller") {
                           {product.seller}
                         </Text>
                         <Text style={styles.productPrice}>
+                          {product.variants?.length ? "From " : ""}
                           ₱{product.price.toLocaleString("en-PH")}
                         </Text>
                       </View>
                     </TouchableOpacity>
-
-                    {/* Action buttons: Add to Cart + Buy Now */}
-                    <View style={styles.cardActions}>
-                      <TouchableOpacity
-                        style={[styles.actionButton, styles.addToCartButton]}
-                        activeOpacity={0.85}
-                        onPress={() => addToCart(product)}
-                        accessibilityLabel={`Add ${product.name} to cart`}
-                      >
-                        <Text style={styles.actionButtonText}>Add to Cart</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.actionButton, styles.buyNowButton]}
-                        activeOpacity={0.85}
-                        onPress={() => handleBuyNow(product)}
-                        accessibilityLabel={`Buy ${product.name} now`}
-                      >
-                        <Text style={styles.actionButtonText}>Buy Now</Text>
-                      </TouchableOpacity>
-                    </View>
 
                     {/* Favorite heart button */}
                     <TouchableOpacity
@@ -543,6 +508,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 22,
   },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 9 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logo: { width: 48, height: 48 },
   imageFallback: {
@@ -726,22 +692,6 @@ const styles = StyleSheet.create({
     color: "#245B43",
     marginTop: 10,
   },
-  cardActions: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addToCartButton: { backgroundColor: "#245B43" },
-  buyNowButton: { backgroundColor: "#D66A4A" },
-  actionButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
   emptyState: {
     alignItems: "center",
     backgroundColor: "#FFFFFF",

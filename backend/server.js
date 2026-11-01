@@ -6,6 +6,7 @@ const cors = require("cors");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
@@ -149,6 +150,59 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET is missing from your .env file.");
+}
+
+function getPasswordResetTransport() {
+  const { SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM } = process.env;
+  const port = Number(process.env.SMTP_PORT);
+
+  if (
+    !SMTP_HOST ||
+    !SMTP_USER ||
+    !SMTP_PASSWORD ||
+    !SMTP_FROM ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    return null;
+  }
+
+  return {
+    transporter: nodemailer.createTransport({
+      host: SMTP_HOST,
+      port,
+      secure: process.env.SMTP_SECURE === "true",
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASSWORD,
+      },
+    }),
+    from: SMTP_FROM,
+  };
+}
+
+function getPasswordResetLink(token) {
+  const appBaseUrl = process.env.APP_BASE_URL || "likhalocal://";
+  const normalizedBaseUrl = appBaseUrl.endsWith("://")
+    ? `${appBaseUrl}/`
+    : appBaseUrl.replace(/\/+$/, "");
+  const separator = normalizedBaseUrl.endsWith("/") ? "" : "/";
+
+  return `${normalizedBaseUrl}${separator}reset-password?token=${encodeURIComponent(token)}`;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
 }
 
 // =========================
@@ -670,10 +724,25 @@ app.get("/api/health", async (req, res) => {
 // 9. AUTHENTICATION ROUTES
 // =========================
 
-// Register a customer account
+// Register a customer or seller account
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { full_name, email, password, phone, address } = req.body;
+    const {
+      full_name,
+      email,
+      password,
+      phone,
+      address,
+      role,
+    } = req.body;
+    const accountRole = role === undefined ? "customer" : role;
+
+    if (accountRole !== "customer" && accountRole !== "seller") {
+      return res.status(400).json({
+        success: false,
+        message: "Account type must be customer or seller.",
+      });
+    }
 
     if (
       !full_name ||
@@ -730,13 +799,14 @@ app.post("/api/auth/register", async (req, res) => {
     const [result] = await pool.execute(
       `INSERT INTO users
         (full_name, email, password_hash, phone, address, role, is_active)
-       VALUES (?, ?, ?, ?, ?, 'customer', 1)`,
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
       [
         cleanName,
         cleanEmail,
         passwordHash,
         phone || null,
         address || null,
+        accountRole,
       ]
     );
 
@@ -746,7 +816,7 @@ app.post("/api/auth/register", async (req, res) => {
       email: cleanEmail,
       phone: phone || null,
       address: address || null,
-      role: "customer",
+      role: accountRole,
       profile_image: null,
     };
 
@@ -756,12 +826,12 @@ app.post("/api/auth/register", async (req, res) => {
       user.id,
       user.role,
       "auth",
-      "Created a customer account"
+      `Created a ${accountRole} account`
     );
 
     return res.status(201).json({
       success: true,
-      message: "Customer account registered successfully.",
+      message: `${accountRole === "seller" ? "Seller" : "Customer"} account registered successfully.`,
       token,
       user,
     });
@@ -779,6 +849,231 @@ app.post("/api/auth/register", async (req, res) => {
       success: false,
       message: "Unable to register account.",
     });
+  }
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const email =
+    typeof req.body?.email === "string"
+      ? req.body.email.trim().toLowerCase()
+      : "";
+
+  if (
+    !email ||
+    email.length > 190 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Enter a valid email address.",
+    });
+  }
+
+  const mailConfig = getPasswordResetTransport();
+  if (!mailConfig) {
+    console.error(
+      "Password reset email is unavailable: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM must be configured."
+    );
+    return res.status(503).json({
+      success: false,
+      message:
+        "Password recovery is temporarily unavailable. Please contact support.",
+    });
+  }
+
+  let resetId = null;
+
+  try {
+    const [users] = await pool.execute(
+      `SELECT id, full_name, email, firebase_uid
+       FROM users
+       WHERE email = ? AND is_active = 1
+       LIMIT 1`,
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        message:
+          "If an active account uses that email, password reset instructions will be sent.",
+      });
+    }
+
+    const user = users[0];
+    const [recentRequests] = await pool.execute(
+      `SELECT id
+       FROM password_reset_tokens
+       WHERE user_id = ?
+         AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE)
+       LIMIT 1`,
+      [user.id]
+    );
+
+    if (recentRequests.length > 0) {
+      return res.json({
+        success: true,
+        message:
+          "If an active account uses that email, password reset instructions will be sent.",
+      });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex");
+
+    await pool.execute(
+      `DELETE FROM password_reset_tokens
+       WHERE user_id = ? AND used_at IS NULL`,
+      [user.id]
+    );
+
+    const [insertResult] = await pool.execute(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES (?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))`,
+      [user.id, tokenHash]
+    );
+    resetId = insertResult.insertId;
+
+    const resetLink = getPasswordResetLink(rawToken);
+    const safeName = escapeHtml(user.full_name);
+    const safeLink = escapeHtml(resetLink);
+
+    await mailConfig.transporter.sendMail({
+      from: mailConfig.from,
+      to: user.email,
+      subject: "Reset your LikhaLocal password",
+      text:
+        `Hello ${user.full_name},\n\n` +
+        `Use this link to reset your LikhaLocal password within 30 minutes:\n${resetLink}\n\n` +
+        "If you did not request this, you can ignore this email.",
+      html:
+        `<p>Hello ${safeName},</p>` +
+        "<p>Use the link below to reset your LikhaLocal password. It expires in 30 minutes.</p>" +
+        `<p><a href="${safeLink}">Reset password</a></p>` +
+        "<p>If you did not request this, you can ignore this email.</p>",
+    });
+
+    return res.json({
+      success: true,
+      message:
+        "If an active account uses that email, password reset instructions will be sent.",
+    });
+  } catch (error) {
+    if (resetId !== null) {
+      await pool
+        .execute("DELETE FROM password_reset_tokens WHERE id = ?", [resetId])
+        .catch((cleanupError) => {
+          console.error("Could not remove unsent password reset token:", cleanupError);
+        });
+    }
+
+    console.error("Request password reset error:", error);
+    return res.status(503).json({
+      success: false,
+      message:
+        "Unable to send password reset instructions right now. Please try again later.",
+    });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const token =
+    typeof req.body?.token === "string" ? req.body.token.trim() : "";
+  const password =
+    typeof req.body?.password === "string" ? req.body.password : "";
+
+  if (!/^[a-f0-9]{64}$/i.test(token)) {
+    return res.status(400).json({
+      success: false,
+      message: "This password reset link is invalid or has expired.",
+    });
+  }
+
+  if (password.length < 8 || password.length > 72) {
+    return res.status(400).json({
+      success: false,
+      message: "Password must contain between 8 and 72 characters.",
+    });
+  }
+
+  let connection;
+
+  try {
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [resetRows] = await connection.execute(
+      `SELECT
+         reset.id AS reset_id,
+         account.id AS user_id,
+         account.firebase_uid
+       FROM password_reset_tokens reset
+       JOIN users account ON account.id = reset.user_id
+       WHERE reset.token_hash = ?
+         AND reset.used_at IS NULL
+         AND reset.expires_at > CURRENT_TIMESTAMP
+         AND account.is_active = 1
+       LIMIT 1
+       FOR UPDATE`,
+      [tokenHash]
+    );
+
+    if (resetRows.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "This password reset link is invalid or has expired.",
+      });
+    }
+
+    const reset = resetRows[0];
+
+    if (reset.firebase_uid) {
+      await firebaseAdminAuth.updateUser(reset.firebase_uid, { password });
+    }
+
+    await connection.execute(
+      "UPDATE users SET password_hash = ? WHERE id = ?",
+      [passwordHash, reset.user_id]
+    );
+    await connection.execute(
+      `UPDATE password_reset_tokens
+       SET used_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND used_at IS NULL`,
+      [reset.user_id]
+    );
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Your password was reset successfully. You can now log in.",
+    });
+  } catch (error) {
+    if (connection) {
+      await connection.rollback().catch((rollbackError) => {
+        console.error("Password reset rollback error:", rollbackError);
+      });
+    }
+
+    console.error("Reset password error:", error);
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to reset your password. Please request a new reset link or contact support.",
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
@@ -1380,9 +1675,56 @@ app.get("/api/categories", async (req, res) => {
 });
 
 // Get approved products for public browsing
+async function attachProductVariants(products, executor = pool) {
+  if (products.length === 0) {
+    return products;
+  }
+
+  const productIds = products.map((product) => Number(product.id));
+  const placeholders = productIds.map(() => "?").join(", ");
+  const [variants] = await executor.execute(
+    `SELECT id, product_id, size, color, price, stock
+     FROM product_variants
+     WHERE product_id IN (${placeholders})
+     ORDER BY id ASC`,
+    productIds
+  );
+  const variantsByProduct = new Map();
+
+  for (const variant of variants) {
+    const productId = Number(variant.product_id);
+    const productVariants = variantsByProduct.get(productId) || [];
+    productVariants.push({
+      id: Number(variant.id),
+      size: variant.size || "",
+      color: variant.color || "",
+      price: Number(variant.price),
+      stock: Number(variant.stock),
+    });
+    variantsByProduct.set(productId, productVariants);
+  }
+
+  return products.map((product) => {
+    const productVariants = variantsByProduct.get(Number(product.id)) || [];
+    if (productVariants.length === 0) {
+      return product;
+    }
+
+    return {
+      ...product,
+      price: Math.min(...productVariants.map((variant) => variant.price)),
+      stock: productVariants.reduce(
+        (total, variant) => total + variant.stock,
+        0
+      ),
+      variants: productVariants,
+    };
+  });
+}
+
 app.get("/api/products", async (req, res) => {
   try {
-    const [products] = await pool.execute(
+    const [productRows] = await pool.execute(
       `SELECT
         p.id,
         p.seller_id,
@@ -1397,10 +1739,14 @@ app.get("/api/products", async (req, res) => {
         u.full_name AS seller_name
        FROM products p
        LEFT JOIN categories c ON p.category_id = c.id
-       LEFT JOIN users u ON p.seller_id = u.id
+       INNER JOIN users u
+         ON p.seller_id = u.id
+        AND u.role = 'seller'
+        AND u.is_active = 1
        WHERE p.status = 'approved'
        ORDER BY p.id DESC`
     );
+    const products = await attachProductVariants(productRows);
 
     return res.json({
       success: true,
@@ -1427,7 +1773,7 @@ app.get(
   allowRoles("seller"),
   async (req, res) => {
     try {
-      const [products] = await pool.execute(
+      const [productRows] = await pool.execute(
         `SELECT
            p.id,
            p.name,
@@ -1446,6 +1792,7 @@ app.get(
          ORDER BY p.id DESC`,
         [req.userId]
       );
+      const products = await attachProductVariants(productRows);
 
       return res.json({
         success: true,
@@ -1469,6 +1816,8 @@ app.post(
   allowRoles("seller"),
   handleProductImageUpload,
   async (req, res) => {
+    let connection;
+
     try {
       const {
         name,
@@ -1476,6 +1825,7 @@ app.post(
         price,
         shipping_fee,
         stock,
+        variants,
         category_id,
         image_url,
       } = req.body;
@@ -1488,9 +1838,107 @@ app.post(
           ? description.trim()
           : "";
 
-      const productPrice = Number(price);
+      let productPrice = Number(price);
       const productShippingFee = Number(shipping_fee);
-      const productStock = Number(stock);
+      let productStock = Number(stock);
+      let productVariants = [];
+
+      if (variants !== undefined && variants !== null) {
+        try {
+          productVariants =
+            typeof variants === "string" ? JSON.parse(variants) : variants;
+        } catch {
+          return res.status(400).json({
+            success: false,
+            message: "Product variations must be valid JSON.",
+          });
+        }
+
+        if (
+          !Array.isArray(productVariants) ||
+          productVariants.length === 0 ||
+          productVariants.length > 100
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Add between 1 and 100 product variations.",
+          });
+        }
+
+        const seenOptions = new Set();
+        let totalVariantStock = 0;
+        let lowestVariantPrice = Number.POSITIVE_INFINITY;
+
+        for (const [index, variant] of productVariants.entries()) {
+          const size =
+            typeof variant?.size === "string" ? variant.size.trim() : "";
+          const color =
+            typeof variant?.color === "string" ? variant.color.trim() : "";
+          const variantPrice = Number(variant?.price);
+          const variantStock = Number(variant?.stock);
+
+          if (
+            (!size && !color) ||
+            size.length > 100 ||
+            color.length > 100 ||
+            !Number.isFinite(variantPrice) ||
+            variantPrice <= 0 ||
+            variantPrice > 99999999.99 ||
+            !Number.isInteger(variantStock) ||
+            variantStock < 0 ||
+            variantStock > 2147483647
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Variation ${index + 1} needs a size or color, a valid price, and whole-number stock.`,
+            });
+          }
+
+          const optionKey = `${size.toLowerCase()}\u0000${color.toLowerCase()}`;
+          if (seenOptions.has(optionKey)) {
+            return res.status(400).json({
+              success: false,
+              message: "Product variation combinations must be unique.",
+            });
+          }
+
+          seenOptions.add(optionKey);
+          totalVariantStock += variantStock;
+          lowestVariantPrice = Math.min(lowestVariantPrice, variantPrice);
+          productVariants[index] = {
+            size: size || null,
+            color: color || null,
+            price: variantPrice,
+            stock: variantStock,
+          };
+        }
+
+        const hasSizes = productVariants.some((variant) => variant.size);
+        const hasColors = productVariants.some((variant) => variant.color);
+        if (
+          productVariants.some(
+            (variant) =>
+              Boolean(variant.size) !== hasSizes ||
+              Boolean(variant.color) !== hasColors
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Use the same variation fields for every option combination.",
+          });
+        }
+
+        if (totalVariantStock > 2147483647) {
+          return res.status(400).json({
+            success: false,
+            message: "The combined variation stock is too large.",
+          });
+        }
+
+        productPrice = lowestVariantPrice;
+        productStock = totalVariantStock;
+      }
 
       const categoryId =
         category_id === "" ||
@@ -1513,12 +1961,13 @@ app.post(
       }
 
       if (
-        price === "" ||
-        price === null ||
-        price === undefined ||
-        !Number.isFinite(productPrice) ||
-        productPrice <= 0 ||
-        productPrice > 99999999.99
+        productVariants.length === 0 &&
+        (price === "" ||
+          price === null ||
+          price === undefined ||
+          !Number.isFinite(productPrice) ||
+          productPrice <= 0 ||
+          productPrice > 99999999.99)
       ) {
         return res.status(400).json({
           success: false,
@@ -1541,12 +1990,13 @@ app.post(
       }
 
       if (
-        stock === "" ||
-        stock === null ||
-        stock === undefined ||
-        !Number.isInteger(productStock) ||
-        productStock < 0 ||
-        productStock > 2147483647
+        productVariants.length === 0 &&
+        (stock === "" ||
+          stock === null ||
+          stock === undefined ||
+          !Number.isInteger(productStock) ||
+          productStock < 0 ||
+          productStock > 2147483647)
       ) {
         return res.status(400).json({
           success: false,
@@ -1588,7 +2038,10 @@ app.post(
         });
       }
 
-      const [result] = await pool.execute(
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [result] = await connection.execute(
         `INSERT INTO products
           (
             seller_id,
@@ -1613,6 +2066,30 @@ app.post(
           productImage,
         ]
       );
+
+      const savedVariants = [];
+      for (const variant of productVariants) {
+        const [variantResult] = await connection.execute(
+          `INSERT INTO product_variants
+            (product_id, size, color, price, stock)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            result.insertId,
+            variant.size,
+            variant.color,
+            variant.price,
+            variant.stock,
+          ]
+        );
+        savedVariants.push({
+          id: variantResult.insertId,
+          ...variant,
+        });
+      }
+
+      await connection.commit();
+      connection.release();
+      connection = null;
 
       // Notify active staff after saving the product.
       await notifyStaffOfPendingProduct({
@@ -1642,15 +2119,28 @@ app.post(
           stock: productStock,
           image_url: productImage,
           status: "pending",
+          variants: savedVariants,
         },
       });
     } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error("Product creation rollback error:", rollbackError);
+        }
+      }
+
       console.error("Submit seller product error:", error);
 
       return res.status(500).json({
         success: false,
         message: "Unable to submit your product.",
       });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
   }
 );
@@ -1715,7 +2205,8 @@ app.get(
 
       sql += " ORDER BY p.id DESC";
 
-      const [products] = await pool.execute(sql, params);
+      const [productRows] = await pool.execute(sql, params);
+      const products = await attachProductVariants(productRows);
 
       return res.json({
         success: true,
@@ -1991,6 +2482,62 @@ app.get(
       return res.status(500).json({
         success: false,
         message: "Unable to retrieve admin dashboard statistics.",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/admin/categories",
+  authenticateUser,
+  allowRoles("admin"),
+  async (req, res) => {
+    const name =
+      typeof req.body?.name === "string" ? req.body.name.trim() : "";
+
+    if (!name || name.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Category name must be between 1 and 100 characters.",
+      });
+    }
+
+    try {
+      const [result] = await pool.execute(
+        "INSERT INTO categories (name) VALUES (?)",
+        [name]
+      );
+
+      const category = {
+        id: result.insertId,
+        name,
+        description: null,
+      };
+
+      await recordUserActivity(
+        req.userId,
+        req.userRole,
+        "category",
+        `Created category "${name}"`
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: "Category created successfully.",
+        category,
+      });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({
+          success: false,
+          message: "A category with this name already exists.",
+        });
+      }
+
+      console.error("Create category error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to create the category.",
       });
     }
   }
@@ -2367,7 +2914,8 @@ app.get(
 
       sql += " ORDER BY p.id DESC";
 
-      const [products] = await pool.execute(sql, params);
+      const [productRows] = await pool.execute(sql, params);
+      const products = await attachProductVariants(productRows);
 
       return res.json({
         success: true,
@@ -2401,7 +2949,7 @@ app.get(
         });
       }
 
-      const [products] = await pool.execute(
+      const [productRows] = await pool.execute(
         `
           SELECT
             p.id,
@@ -2427,12 +2975,13 @@ app.get(
         [productId]
       );
 
-      if (products.length === 0) {
+      if (productRows.length === 0) {
         return res.status(404).json({
           success: false,
           message: "Product not found.",
         });
       }
+      const [product] = await attachProductVariants(productRows);
 
       await recordUserActivity(
         req.userId,
@@ -2444,7 +2993,7 @@ app.get(
       return res.json({
         success: true,
         message: "Product details retrieved successfully.",
-        product: products[0],
+        product,
       });
     } catch (error) {
       console.error("Get staff product details error:", error);
@@ -2750,6 +3299,54 @@ app.put(
   }
 );
 
+app.get(
+  "/api/seller/reviews",
+  authenticateUser,
+  allowRoles("seller"),
+  async (req, res) => {
+    try {
+      const [reviews] = await pool.execute(
+        `SELECT
+           review.id,
+           review.order_id,
+           review.product_id,
+           review.rating,
+           review.comment,
+           review.created_at,
+           product.name AS product_name,
+           customer.full_name AS customer_name
+         FROM product_reviews review
+         JOIN products product ON product.id = review.product_id
+         JOIN users customer ON customer.id = review.customer_id
+         WHERE product.seller_id = ?
+         ORDER BY review.created_at DESC, review.id DESC
+         LIMIT 100`,
+        [req.userId]
+      );
+
+      return res.json({
+        success: true,
+        reviews: reviews.map((review) => ({
+          id: review.id,
+          orderId: review.order_id,
+          productId: review.product_id,
+          productName: review.product_name,
+          customerName: review.customer_name,
+          rating: Number(review.rating),
+          comment: review.comment || "",
+          createdAt: review.created_at,
+        })),
+      });
+    } catch (error) {
+      console.error("Fetch seller reviews error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to retrieve product reviews.",
+      });
+    }
+  }
+);
+
 /* =========================
    CUSTOMER ORDER CHECKOUT
 ========================= */
@@ -2798,19 +3395,27 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
     });
   }
 
-  // Combine duplicate product IDs and validate quantities.
+  // Combine duplicate product/variation pairs and validate quantities.
   const quantities = new Map();
 
   for (const item of items) {
     const productId = Number(item.productId);
     const quantity = Number(item.quantity);
+    const variantId =
+      item.variantId === undefined ||
+      item.variantId === null ||
+      item.variantId === ""
+        ? null
+        : Number(item.variantId);
 
     if (
       !Number.isSafeInteger(productId) ||
       productId <= 0 ||
       !Number.isSafeInteger(quantity) ||
       quantity <= 0 ||
-      quantity > 999
+      quantity > 999 ||
+      (variantId !== null &&
+        (!Number.isSafeInteger(variantId) || variantId <= 0))
     ) {
       return res.status(400).json({
         success: false,
@@ -2818,8 +3423,9 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
       });
     }
 
+    const itemKey = `${productId}:${variantId ?? "base"}`;
     const combinedQuantity =
-      (quantities.get(productId) || 0) + quantity;
+      (quantities.get(itemKey)?.quantity || 0) + quantity;
 
     if (combinedQuantity > 999) {
       return res.status(400).json({
@@ -2828,7 +3434,11 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
       });
     }
 
-    quantities.set(productId, combinedQuantity);
+    quantities.set(itemKey, {
+      productId,
+      variantId,
+      quantity: combinedQuantity,
+    });
   }
 
   let connection;
@@ -2844,7 +3454,7 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
     let subtotal = 0;
 
     // Lock each product and retrieve its actual seller fee.
-    for (const [productId, quantity] of quantities) {
+    for (const { productId, variantId, quantity } of quantities.values()) {
       const [products] = await connection.execute(
         `SELECT
            p.id,
@@ -2855,7 +3465,10 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
            p.status,
            p.seller_id
          FROM products p
-         INNER JOIN users u ON u.id = p.seller_id
+         INNER JOIN users u
+           ON u.id = p.seller_id
+          AND u.role = 'seller'
+          AND u.is_active = 1
          WHERE p.id = ?
          FOR UPDATE`,
         [productId]
@@ -2870,6 +3483,44 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
       }
 
       const product = products[0];
+      let variant = null;
+
+      if (variantId !== null) {
+        const [variantRows] = await connection.execute(
+          `SELECT id, size, color, price, stock
+           FROM product_variants
+           WHERE id = ? AND product_id = ?
+           FOR UPDATE`,
+          [variantId, productId]
+        );
+
+        if (variantRows.length === 0) {
+          const error = new Error(
+            `The selected variation for ${product.name} is unavailable.`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+
+        variant = variantRows[0];
+      } else {
+        const [variantRows] = await connection.execute(
+          `SELECT id
+           FROM product_variants
+           WHERE product_id = ?
+           LIMIT 1
+           FOR UPDATE`,
+          [productId]
+        );
+
+        if (variantRows.length > 0) {
+          const error = new Error(
+            `Choose a variation for ${product.name} before checkout.`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+      }
 
       if (product.status !== "approved") {
         const error = new Error(
@@ -2879,16 +3530,28 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
         throw error;
       }
 
-      if (Number(product.stock) < quantity) {
+      const availableStock = variant
+        ? Number(variant.stock)
+        : Number(product.stock);
+
+      if (availableStock < quantity) {
         const error = new Error(
-          `Not enough stock available for ${product.name}.`
+          `Not enough stock available for ${product.name}${variant ? " in the selected variation" : ""}.`
         );
         error.statusCode = 400;
         throw error;
       }
 
-      const unitPrice = Number(product.price);
+      const unitPrice = Number(variant ? variant.price : product.price);
       const productShippingFee = Number(product.shipping_fee);
+      const variantDetails = variant
+        ? [
+            variant.size ? `Size: ${variant.size}` : "",
+            variant.color ? `Color: ${variant.color}` : "",
+          ]
+            .filter(Boolean)
+            .join(", ")
+        : null;
 
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
         throw new Error("A product has an invalid price.");
@@ -2915,6 +3578,8 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
 
       orderItems.push({
         productId: product.id,
+        variantId,
+        variantDetails,
         productName: product.name,
         quantity,
         unitPrice,
@@ -2959,28 +3624,68 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
     );
 
     const orderId = orderResult.insertId;
+    const [createdOrderRows] = await connection.execute(
+      "SELECT created_at FROM orders WHERE id = ?",
+      [orderId]
+    );
+
+    if (createdOrderRows.length === 0) {
+      throw new Error("Could not load the newly created order date.");
+    }
+
+    const createdAt = createdOrderRows[0].created_at;
 
     // Save the order items and safely reduce stock.
     for (const item of orderItems) {
       await connection.execute(
         `INSERT INTO order_items
-          (order_id, product_id, product_name, quantity, unit_price)
-         VALUES (?, ?, ?, ?, ?)`,
+          (
+            order_id,
+            product_id,
+            product_variant_id,
+            variant_details,
+            product_name,
+            quantity,
+            unit_price
+          )
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           item.productId,
+          item.variantId,
+          item.variantDetails,
           item.productName,
           item.quantity,
           item.unitPrice,
         ]
       );
 
-      const [stockResult] = await connection.execute(
-        `UPDATE products
-         SET stock = stock - ?
-         WHERE id = ? AND stock >= ? AND status = 'approved'`,
-        [item.quantity, item.productId, item.quantity]
-      );
+      let stockResult;
+
+      if (item.variantId !== null) {
+        [stockResult] = await connection.execute(
+          `UPDATE product_variants
+           SET stock = stock - ?
+           WHERE id = ? AND product_id = ? AND stock >= ?`,
+          [item.quantity, item.variantId, item.productId, item.quantity]
+        );
+
+        if (stockResult.affectedRows === 1) {
+          [stockResult] = await connection.execute(
+            `UPDATE products
+             SET stock = stock - ?
+             WHERE id = ? AND stock >= ? AND status = 'approved'`,
+            [item.quantity, item.productId, item.quantity]
+          );
+        }
+      } else {
+        [stockResult] = await connection.execute(
+          `UPDATE products
+           SET stock = stock - ?
+           WHERE id = ? AND stock >= ? AND status = 'approved'`,
+          [item.quantity, item.productId, item.quantity]
+        );
+      }
 
       if (stockResult.affectedRows !== 1) {
         const error = new Error(
@@ -3022,6 +3727,7 @@ app.post("/api/orders", authenticateCustomer, async (req, res) => {
         paymentMethod: normalizedPaymentMethod,
         paymentStatus,
         status: "pending",
+        createdAt,
       },
     });
   } catch (error) {
@@ -3075,6 +3781,7 @@ app.get("/api/customer/orders", ...authenticateCustomer, async (req, res) => {
          oi.id AS order_item_id,
          oi.product_id,
          oi.product_name,
+         oi.variant_details,
          oi.quantity,
          oi.unit_price,
          p.image_url,
@@ -3154,6 +3861,7 @@ app.get("/api/customer/orders", ...authenticateCustomer, async (req, res) => {
         id: row.order_item_id,
         productId: row.product_id,
         productName: row.product_name,
+        variantDetails: row.variant_details,
         imageUrl: row.image_url,
         sellerId: row.seller_id,
         sellerName: row.seller_name || "Local Seller",
@@ -3631,10 +4339,17 @@ app.post(
 
     try {
       const [items] = await pool.execute(
-        `SELECT oi.order_id, oi.product_id, sos.status
+        `SELECT
+           oi.order_id,
+           oi.product_id,
+           p.seller_id,
+           p.name AS product_name,
+           customer.full_name AS customer_name,
+           sos.status
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          JOIN products p ON p.id = oi.product_id
+         JOIN users customer ON customer.id = o.customer_id
          JOIN seller_order_status sos
            ON sos.order_id = o.id AND sos.seller_id = p.seller_id
          WHERE oi.id = ? AND o.customer_id = ?
@@ -3669,6 +4384,12 @@ app.post(
         "customer",
         "review",
         `Reviewed product #${item.product_id} from order #${item.order_id}`
+      );
+      await recordUserActivity(
+        item.seller_id,
+        "seller",
+        "review",
+        `${item.customer_name} left a ${rating}-star review for "${item.product_name}"`
       );
 
       return res.status(201).json({ success: true, message: "Review submitted." });
@@ -3824,6 +4545,7 @@ app.get(
             oi.product_id,
             oi.id AS order_item_id,
             oi.product_name,
+            oi.variant_details,
             oi.quantity,
             oi.unit_price
          FROM seller_order_status sos
@@ -3867,6 +4589,7 @@ app.get(
           orderItemId: row.order_item_id,
           productId: row.product_id,
           productName: row.product_name,
+          variantDetails: row.variant_details,
           quantity: row.quantity,
           unitPrice: Number(row.unit_price),
           subtotal: Number(row.unit_price) * row.quantity,
@@ -3980,14 +4703,15 @@ app.patch(
       connection = await pool.getConnection();
       await connection.beginTransaction();
 
-      // Ensure this order contains a product belonging to this seller.
+      // Lock the seller's order items so rejection and inventory restoration
+      // happen together without racing another response to the same order.
       const [sellerItems] = await connection.execute(
-        `SELECT oi.id
+        `SELECT oi.product_id, oi.product_variant_id, oi.quantity
          FROM order_items oi
          JOIN products p ON p.id = oi.product_id
          WHERE oi.order_id = ?
            AND p.seller_id = ?
-         LIMIT 1`,
+         FOR UPDATE`,
         [orderId, sellerId]
       );
 
@@ -4024,6 +4748,59 @@ app.patch(
           success: false,
           message: "You have already responded to this order.",
         });
+      }
+
+      if (decision === "rejected") {
+        const restockQuantities = new Map();
+        const variantRestockQuantities = new Map();
+
+        for (const item of sellerItems) {
+          const productId = Number(item.product_id);
+          const quantity = Number(item.quantity);
+
+          restockQuantities.set(
+            productId,
+            (restockQuantities.get(productId) || 0) + quantity
+          );
+
+          if (item.product_variant_id !== null) {
+            const variantId = Number(item.product_variant_id);
+            variantRestockQuantities.set(
+              variantId,
+              (variantRestockQuantities.get(variantId) || 0) + quantity
+            );
+          }
+        }
+
+        for (const [variantId, quantity] of variantRestockQuantities) {
+          const [variantResult] = await connection.execute(
+            `UPDATE product_variants
+             SET stock = stock + ?
+             WHERE id = ?`,
+            [quantity, variantId]
+          );
+
+          if (variantResult.affectedRows !== 1) {
+            throw new Error(
+              `Could not restore stock for variation #${variantId}.`
+            );
+          }
+        }
+
+        for (const [productId, quantity] of restockQuantities) {
+          const [stockResult] = await connection.execute(
+            `UPDATE products
+             SET stock = stock + ?
+             WHERE id = ? AND seller_id = ?`,
+            [quantity, productId, sellerId]
+          );
+
+          if (stockResult.affectedRows !== 1) {
+            throw new Error(
+              `Could not restore stock for product #${productId}.`
+            );
+          }
+        }
       }
 
       await connection.commit();

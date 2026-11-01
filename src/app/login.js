@@ -177,6 +177,20 @@ if (role === "admin") {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={styles.forgotPasswordLink}
+              onPress={() =>
+                router.push({
+                  pathname: "/forgot-password",
+                  params: { email: email.trim().toLowerCase() },
+                })
+              }
+              disabled={loading}
+              accessibilityRole="button"
+            >
+              <Text style={styles.linkText}>Forgot password?</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[styles.primaryButton, loading && styles.disabledButton]}
               onPress={handleLogin}
               disabled={loading}
@@ -334,6 +348,10 @@ const styles = StyleSheet.create({
     color: "#426B50",
     fontSize: 13,
     fontWeight: "600",
+  },
+  forgotPasswordLink: {
+    alignSelf: "flex-end",
+    paddingVertical: 8,
   },
   primaryButton: {
     backgroundColor: "#426B50",

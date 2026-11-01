@@ -2,6 +2,7 @@
   "expo": {
     "name": "LikhaLocal",
     "slug": "LikhaLocal",
+    "scheme": "likhalocal",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/likhalocal-logo.png",

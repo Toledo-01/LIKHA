@@ -2,43 +2,73 @@ import { createContext, useContext, useState } from "react";
 
 const CartContext = createContext(null);
 
+function getCartItemKey(item) {
+  return String(
+    item.cartKey ?? `${item.id}:${item.variantId ?? "base"}`
+  );
+}
+
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
 
   const addToCart = (product) => {
+    if (Number(product.stock) <= 0) {
+      return;
+    }
+
+    const cartKey = getCartItemKey(product);
+
     setCartItems((currentItems) => {
       const existingItem = currentItems.find(
-        (item) => item.id === product.id
+        (item) => getCartItemKey(item) === cartKey
       );
 
       if (existingItem) {
         return currentItems.map((item) =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
+          getCartItemKey(item) === cartKey
+            ? {
+                ...item,
+                quantity: Math.min(
+                  Number.isFinite(Number(item.stock))
+                    ? Number(item.stock)
+                    : Number.MAX_SAFE_INTEGER,
+                  item.quantity + 1
+                ),
+              }
             : item
         );
       }
 
-      return [...currentItems, { ...product, quantity: 1 }];
+      return [...currentItems, { ...product, cartKey, quantity: 1 }];
     });
   };
 
-  const updateQuantity = (productId, quantity) => {
+  const updateQuantity = (cartKey, quantity) => {
     if (quantity <= 0) {
-      removeFromCart(productId);
+      removeFromCart(cartKey);
       return;
     }
 
     setCartItems((currentItems) =>
       currentItems.map((item) =>
-        item.id === productId ? { ...item, quantity } : item
+        getCartItemKey(item) === String(cartKey)
+          ? {
+              ...item,
+              quantity:
+                Number.isFinite(Number(item.stock)) && Number(item.stock) > 0
+                  ? Math.min(Number(item.stock), quantity)
+                  : item.quantity,
+            }
+          : item
       )
     );
   };
 
-  const removeFromCart = (productId) => {
+  const removeFromCart = (cartKey) => {
     setCartItems((currentItems) =>
-      currentItems.filter((item) => item.id !== productId)
+      currentItems.filter(
+        (item) => getCartItemKey(item) !== String(cartKey)
+      )
     );
   };
 

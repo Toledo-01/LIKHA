@@ -11,8 +11,8 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useAuth } from "../context/AuthContext";
 import { getToken } from "../services/auth";
+import AccountMenu from "../components/AccountMenu";
 
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -20,7 +20,6 @@ export const API_BASE_URL =
 
 export default function StaffScreen() {
   const router = useRouter();
-  const { logout } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,7 +72,7 @@ export default function StaffScreen() {
 
       setStaffRole(data.role);
       setHasAccess(true);
-    } catch (error) {
+    } catch (_error) {
       setMessage(
         "Cannot connect to the server. Check that your backend is running and your API address is correct."
       );
@@ -109,16 +108,6 @@ export default function StaffScreen() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      router.replace("/login");
-    } catch (error) {
-      console.error("Logout failed:", error);
-      setMessage("Could not log out. Please try again.");
-    }
-  };
-
   const openScreen = (path) => {
     router.push(path);
   };
@@ -143,14 +132,17 @@ export default function StaffScreen() {
       }
     >
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <Image
-            source={require("../../assets/likhalocal-logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-            accessibilityLabel="LikhaLocal logo"
-          />
-          <Text style={styles.brand}>LikhaLocal</Text>
+        <View style={styles.headerTop}>
+          <View style={styles.brandRow}>
+            <Image
+              source={require("../../assets/likhalocal-logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityLabel="LikhaLocal logo"
+            />
+            <Text style={styles.brand}>LikhaLocal</Text>
+          </View>
+          <AccountMenu />
         </View>
         <Text style={styles.heading}>Staff Dashboard</Text>
         <Text style={styles.subtitle}>
@@ -248,31 +240,6 @@ export default function StaffScreen() {
             </View>
           </Pressable>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Account</Text>
-          </View>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.profileCard,
-              pressed && styles.cardPressed,
-            ]}
-            onPress={() => openScreen("/profile")}
-          >
-            <View style={styles.profileIconBox}>
-              <Text style={styles.profileIcon}>♙</Text>
-            </View>
-
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileTitle}>My Profile</Text>
-              <Text style={styles.profileDescription}>
-                View your account and personal information.
-              </Text>
-            </View>
-
-            <Text style={styles.profileArrow}>›</Text>
-          </Pressable>
-
           <View style={styles.noticeCard}>
             <Text style={styles.noticeTitle}>
               🔒 Staff Permissions
@@ -284,15 +251,6 @@ export default function StaffScreen() {
             </Text>
           </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.logoutButton,
-              pressed && styles.cardPressed,
-            ]}
-            onPress={handleLogout}
-          >
-            <Text style={styles.logoutButtonText}>Log Out</Text>
-          </Pressable>
         </>
       ) : (
         <View style={styles.errorCard}>
@@ -338,11 +296,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 22,
   },
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 7,
+  },
   brandRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 7,
   },
   logo: {
     width: 48,
@@ -663,4 +626,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-

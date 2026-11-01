@@ -64,10 +64,10 @@ async function parseResponse(response, fallbackMessage) {
 }
 
 /* =========================
-   CUSTOMER REGISTRATION
+   ACCOUNT REGISTRATION
 ========================= */
 
-export async function registerCustomer(customerData) {
+export async function registerAccount(accountData) {
   const response = await fetch(
     `${API_BASE_URL}/api/auth/register`,
     {
@@ -75,7 +75,7 @@ export async function registerCustomer(customerData) {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(customerData),
+      body: JSON.stringify(accountData),
     }
   );
 
@@ -130,6 +130,42 @@ export async function loginCustomer(email, password) {
   await saveToken(data.token);
 
   return data;
+}
+
+export async function requestPasswordReset(email) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/forgot-password`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    }
+  );
+
+  return parseResponse(
+    response,
+    "Unable to request a password reset."
+  );
+}
+
+export async function resetAccountPassword(token, password) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/reset-password`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ token, password }),
+    }
+  );
+
+  return parseResponse(
+    response,
+    "Unable to reset your password."
+  );
 }
 
 /* =========================

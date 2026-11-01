@@ -123,6 +123,8 @@ export default function AdminProductsScreen() {
       ? params.status[0]
       : params.status || "";
 
+    // Keep the selected filter in sync when dashboard navigation changes the route.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFilter(
       FILTERS.some((item) => item.value === nextStatus)
         ? nextStatus
@@ -391,6 +393,7 @@ export default function AdminProductsScreen() {
           </Text>
 
           <Text style={styles.price}>
+            {item.variants?.length ? "From " : ""}
             ₱
             {Number(item.price || 0).toLocaleString("en-PH", {
               minimumFractionDigits: 2,
@@ -421,6 +424,18 @@ export default function AdminProductsScreen() {
           <Text style={styles.detail}>
             Stock: {item.stock ?? 0}
           </Text>
+
+          {item.variants?.length ? (
+            <Text style={styles.detail}>
+              Variations:{" "}
+              {item.variants
+                .map((variant) => {
+                  const options = [variant.size, variant.color].filter(Boolean);
+                  return `${options.join(" / ")} — ₱${Number(variant.price).toFixed(2)} (${variant.stock} in stock)`;
+                })
+                .join(", ")}
+            </Text>
+          ) : null}
 
           <View
             style={[

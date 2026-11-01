@@ -11,7 +11,7 @@ import {
   getMyProfile,
   loginCustomer,
   recordLogoutActivity,
-  registerCustomer,
+  registerAccount,
   removeToken,
   updateMyProfile,
   uploadProfilePicture,
@@ -81,9 +81,9 @@ export function AuthProvider({ children }) {
     return data;
   }
 
-  // Register a new customer.
-  async function register(customerData) {
-    const data = await registerCustomer(customerData);
+  // Register a new account.
+  async function register(accountData) {
+    const data = await registerAccount(accountData);
 
     if (!data?.user) {
       throw new Error(

@@ -127,6 +127,8 @@ export default function AdminUsersScreen() {
   // Retrieve registered accounts
   const fetchUsers = useCallback(async (isRefresh = false) => {
     try {
+      const token = await getToken();
+
       if (isRefresh) {
         setRefreshing(true);
       } else {
@@ -134,8 +136,6 @@ export default function AdminUsersScreen() {
       }
 
       setError("");
-
-      const token = await getToken();
 
       if (!token) {
         setUsers([]);
@@ -267,7 +267,7 @@ export default function AdminUsersScreen() {
 
   useEffect(() => {
     if (!authLoading && user?.role === "admin") {
-      fetchUsers();
+      Promise.resolve().then(fetchUsers);
     }
   }, [authLoading, user?.role, fetchUsers]);
 

@@ -15,7 +15,6 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, Redirect, useFocusEffect } from "expo-router";
 import { fetchProducts } from "../services/api";
-import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 
 const FAVORITES_KEY = "likhaLocalFavorites";
@@ -91,8 +90,6 @@ function ProductThumbnail({ imageUrl, backgroundColor, emoji, name }) {
 
 export default function ExploreScreen() {
   const { user, isLoading: authLoading } = useAuth();
-  const { addToCart } = useCart();
-
   const isStaffBrowsing = user?.role === "staff";
 
   const [products, setProducts] = useState([]);
@@ -157,20 +154,6 @@ export default function ExploreScreen() {
       console.error("Failed to update favorites:", err);
       Alert.alert("Error", "Could not update Favorites.");
     }
-  }
-
-  function handleAddToCart(product) {
-    if (product.stock <= 0) {
-      Alert.alert("Out of Stock", "This product is currently unavailable.");
-      return;
-    }
-
-    addToCart(product);
-
-    Alert.alert(
-      "Added to Cart",
-      `${product.name} has been added to your cart.`
-    );
   }
 
   const query = search.trim().toLowerCase();
@@ -302,7 +285,7 @@ export default function ExploreScreen() {
           </View>
         ) : error ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Couldn't load products</Text>
+            <Text style={styles.emptyTitle}>Couldn&apos;t load products</Text>
             <Text style={styles.message}>{error}</Text>
             <TouchableOpacity
               style={styles.primaryButton}
@@ -358,6 +341,7 @@ export default function ExploreScreen() {
                         {product.seller}
                       </Text>
                       <Text style={styles.price}>
+                        {product.variants?.length ? "From " : ""}
                         ₱{product.price.toLocaleString("en-PH")}
                       </Text>
                     </View>
@@ -385,18 +369,6 @@ export default function ExploreScreen() {
                         </Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.addButton,
-                          product.stock <= 0 && styles.disabledButton,
-                        ]}
-                        disabled={product.stock <= 0}
-                        onPress={() => handleAddToCart(product)}
-                      >
-                        <Text style={styles.addButtonText}>
-                          {product.stock > 0 ? "Add to Cart" : "Out of Stock"}
-                        </Text>
-                      </TouchableOpacity>
                     </>
                   )}
                 </View>
@@ -610,23 +582,6 @@ const styles = StyleSheet.create({
   },
   heartActive: {
     color: "#D94343",
-  },
-  addButton: {
-    backgroundColor: "#245B43",
-    marginHorizontal: 9,
-    marginTop: 10,
-    marginBottom: 10,
-    borderRadius: 9,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  disabledButton: {
-    backgroundColor: "#9AA096",
-  },
-  addButtonText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "800",
   },
   center: {
     flex: 1,

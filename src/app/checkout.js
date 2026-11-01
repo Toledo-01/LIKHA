@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -10,10 +10,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 
 import { useCart } from "../context/CartContext";
-import { createCustomerOrder, fetchProducts } from "../services/api";
+import { createCustomerOrder } from "../services/api";
+import { getEstimatedDeliveryRange } from "../services/deliveryEstimate";
 
 // Replace these sample values with your actual shop payment details.
 // Add your QR images to the assets folder when they are ready.
@@ -51,17 +52,7 @@ const PAYMENT_OPTIONS = [
 ];
 
 export default function CheckoutScreen() {
-  const params = useLocalSearchParams();
   const { cartItems, clearCart } = useCart();
-
-  const buyNowProductId = params.buyNowProductId
-    ? String(params.buyNowProductId)
-    : null;
-
-  const isBuyNow = Boolean(buyNowProductId);
-
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [isLoadingProduct, setIsLoadingProduct] = useState(isBuyNow);
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -74,56 +65,7 @@ export default function CheckoutScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderConfirmation, setOrderConfirmation] = useState(null);
 
-  useEffect(() => {
-    if (!isBuyNow) {
-      setIsLoadingProduct(false);
-      return;
-    }
-
-    let isMounted = true;
-
-    async function loadProduct() {
-      try {
-        setIsLoadingProduct(true);
-
-        const products = await fetchProducts();
-
-        const product = products.find(
-          (item) => String(item.id) === buyNowProductId
-        );
-
-        if (isMounted) {
-          setSelectedProduct(product || null);
-
-          if (!product) {
-            setError(
-              "This product could not be found. Please return to the shop."
-            );
-          }
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err.message || "Unable to load the selected product.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingProduct(false);
-        }
-      }
-    }
-
-    loadProduct();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [buyNowProductId, isBuyNow]);
-
-  const checkoutItems = isBuyNow
-    ? selectedProduct
-      ? [{ ...selectedProduct, quantity: 1 }]
-      : []
-    : cartItems;
+  const checkoutItems = cartItems;
 
   const subtotal = checkoutItems.reduce((sum, item) => {
     return (
@@ -149,6 +91,7 @@ export default function CheckoutScreen() {
       .values(),
   ].reduce((total, fee) => total + fee, 0);
 
+  const checkoutEstimatedDelivery = getEstimatedDeliveryRange(new Date());
   const selectedPaymentDetails =
     paymentMethod === "COD"
       ? null
@@ -179,9 +122,7 @@ export default function CheckoutScreen() {
     }
 
     if (checkoutItems.length === 0) {
-      return isBuyNow
-        ? "The selected product is unavailable."
-        : "Your cart is empty.";
+      return "Your cart is empty.";
     }
 
     for (const item of checkoutItems) {
@@ -214,6 +155,7 @@ export default function CheckoutScreen() {
       const orderPayload = {
         items: checkoutItems.map((item) => ({
           productId: item.id,
+          variantId: item.variantId,
           quantity: Number(item.quantity),
         })),
         deliveryAddress: `${address.trim()}, ${city.trim()}${
@@ -233,10 +175,7 @@ export default function CheckoutScreen() {
         customerName: fullName.trim(),
       });
 
-      // Buy Now must not clear the customer's existing cart.
-      if (!isBuyNow) {
-        clearCart();
-      }
+      clearCart();
     } catch (err) {
       setError(
         err.message || "Failed to place your order. Please try again."
@@ -246,22 +185,13 @@ export default function CheckoutScreen() {
     }
   }
 
-  // Show the loading screen while loading a Buy Now product.
-  if (isLoadingProduct) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#246B45" />
-        <Text style={styles.loadingText}>
-          Loading your product...
-        </Text>
-      </View>
-    );
-  }
-
   // Order confirmation screen.
   if (orderConfirmation) {
     const confirmedPaymentMethod =
       orderConfirmation.paymentMethod || paymentMethod;
+    const estimatedDelivery = getEstimatedDeliveryRange(
+      orderConfirmation.createdAt
+    );
 
     return (
       <ScrollView
@@ -314,6 +244,13 @@ export default function CheckoutScreen() {
             label="Payment Status"
             value={orderConfirmation.paymentStatus || "Unpaid"}
           />
+
+          {estimatedDelivery ? (
+            <SummaryRow
+              label="Estimated Delivery"
+              value={estimatedDelivery}
+            />
+          ) : null}
 
           <SummaryRow
             label="Order Status"
@@ -579,7 +516,7 @@ export default function CheckoutScreen() {
           )}
 
           <Text style={styles.warningText}>
-            Verify the recipient's account name and number before sending
+            Verify the recipient&apos;s account name and number before sending
             money. Never share your payment PIN or OTP.
           </Text>
         </View>
@@ -599,6 +536,10 @@ export default function CheckoutScreen() {
               <Text style={styles.productName}>
                 {item.name || item.product_name || "Product"}
               </Text>
+
+              {item.variantDetails ? (
+                <Text style={styles.productQuantity}>{item.variantDetails}</Text>
+              ) : null}
 
               <Text style={styles.productQuantity}>
                 Qty: {Number(item.quantity || 0)}
@@ -626,10 +567,21 @@ export default function CheckoutScreen() {
           value={formatCurrency(deliveryFeeEstimate)}
         />
 
+        {checkoutEstimatedDelivery ? (
+          <SummaryRow
+            label="Estimated Delivery"
+            value={checkoutEstimatedDelivery}
+          />
+        ) : null}
+
         <Text style={styles.helperText}>
           Estimated shipping uses the highest product fee once per seller.
           Sellers set a fixed fee, so it does not vary by delivery location.
           The server confirms the final fee when you place the order.
+        </Text>
+
+        <Text style={styles.helperText}>
+          Delivery is estimated 5–7 days after your order is placed.
         </Text>
       </View>
 

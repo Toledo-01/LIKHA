@@ -22,6 +22,7 @@ export default function RegisterScreen() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [accountRole, setAccountRole] = useState("customer");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -49,14 +50,15 @@ export default function RegisterScreen() {
     try {
       setLoading(true);
 
-      await register({
+      const data = await register({
         full_name: fullName.trim(),
         email: email.trim().toLowerCase(),
         password,
         phone: phone.trim(),
+        role: accountRole,
       });
 
-      router.replace("/");
+      router.replace(data.user.role === "seller" ? "/seller" : "/");
     } catch (err) {
       setError(err.message || "Registration failed. Please try again.");
     } finally {
@@ -99,6 +101,50 @@ export default function RegisterScreen() {
             <Text style={styles.subtitle}>
               Join LikhaLocal and discover local products.
             </Text>
+
+            <Text style={styles.label}>I want to join as *</Text>
+            <View style={styles.roleOptions}>
+              {[
+                {
+                  role: "customer",
+                  title: "Customer",
+                  description: "Discover and shop local products",
+                },
+                {
+                  role: "seller",
+                  title: "Seller",
+                  description: "Showcase and manage your products",
+                },
+              ].map((option) => {
+                const isSelected = accountRole === option.role;
+
+                return (
+                  <TouchableOpacity
+                    key={option.role}
+                    style={[
+                      styles.roleOption,
+                      isSelected && styles.roleOptionSelected,
+                    ]}
+                    onPress={() => setAccountRole(option.role)}
+                    disabled={loading}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text
+                      style={[
+                        styles.roleOptionTitle,
+                        isSelected && styles.roleOptionTitleSelected,
+                      ]}
+                    >
+                      {option.title}
+                    </Text>
+                    <Text style={styles.roleOptionDescription}>
+                      {option.description}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
             {!!error && (
               <View style={styles.errorBox}>
@@ -282,6 +328,37 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 6,
     marginBottom: 20,
+  },
+  roleOptions: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  roleOption: {
+    flex: 1,
+    minHeight: 82,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#DEDCCF",
+    borderRadius: 11,
+    backgroundColor: "#FFFEFB",
+  },
+  roleOptionSelected: {
+    borderColor: "#426B50",
+    backgroundColor: "#F0F5EF",
+  },
+  roleOptionTitle: {
+    color: "#344A39",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  roleOptionTitleSelected: {
+    color: "#294D37",
+  },
+  roleOptionDescription: {
+    color: "#77766D",
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 5,
   },
   errorBox: {
     backgroundColor: "#FFF0ED",

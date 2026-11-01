@@ -294,6 +294,29 @@ export default function StaffProductDetailsScreen() {
               {product.stock ?? "Not specified"}
             </Text>
 
+            {product.variants?.length ? (
+              <>
+                <Text style={styles.label}>Size/color variations</Text>
+                {product.variants.map((variant) => (
+                  <Text
+                    key={variant.id}
+                    style={styles.value}
+                  >
+                    {[
+                      variant.size ? `Size: ${variant.size}` : "",
+                      variant.color ? `Color: ${variant.color}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                    {" — "}
+                    {formatPrice(variant.price)}
+                    {" · "}
+                    {variant.stock} in stock
+                  </Text>
+                ))}
+              </>
+            ) : null}
+
             <Text style={styles.label}>Seller</Text>
             <Text style={styles.value}>
               {product.seller_name || "Unknown seller"}

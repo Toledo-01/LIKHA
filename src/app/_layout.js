@@ -1,4 +1,3 @@
-﻿
 import { Stack, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { View } from "react-native";
@@ -12,7 +11,6 @@ const tabRoutes = [
   "/explore",
   "/cart",
   "/favorites",
-  "/profile",
   "/orders",
 ];
 

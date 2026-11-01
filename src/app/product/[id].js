@@ -79,6 +79,8 @@ export default function ProductDetailsScreen() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [imageError, setImageError] = useState(false);
+  const [selectedSize, setSelectedSize] = useState("");
+  const [selectedColor, setSelectedColor] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -94,8 +96,16 @@ export default function ProductDetailsScreen() {
         );
 
         if (isMounted) {
-          setProduct(foundProduct ? formatProduct(foundProduct) : null);
+          const formattedProduct = foundProduct
+            ? formatProduct(foundProduct)
+            : null;
+          setProduct(formattedProduct);
           setImageError(false);
+          const variants = formattedProduct?.variants || [];
+          const sizes = [...new Set(variants.map((variant) => variant.size).filter(Boolean))];
+          const colors = [...new Set(variants.map((variant) => variant.color).filter(Boolean))];
+          setSelectedSize(sizes.length === 1 ? sizes[0] : "");
+          setSelectedColor(colors.length === 1 ? colors[0] : "");
         }
       } catch (error) {
         console.error("Failed to load product details:", error);
@@ -129,8 +139,16 @@ export default function ProductDetailsScreen() {
         (item) => String(item.id) === String(id)
       );
 
-      setProduct(foundProduct ? formatProduct(foundProduct) : null);
+      const formattedProduct = foundProduct
+        ? formatProduct(foundProduct)
+        : null;
+      setProduct(formattedProduct);
       setImageError(false);
+      const variants = formattedProduct?.variants || [];
+      const sizes = [...new Set(variants.map((variant) => variant.size).filter(Boolean))];
+      const colors = [...new Set(variants.map((variant) => variant.color).filter(Boolean))];
+      setSelectedSize(sizes.length === 1 ? sizes[0] : "");
+      setSelectedColor(colors.length === 1 ? colors[0] : "");
     } catch (error) {
       console.error("Retry failed:", error);
       setApiError("Unable to load this product. Please try again.");
@@ -197,30 +215,48 @@ export default function ProductDetailsScreen() {
   }
 
   function handleAddToCart() {
-    addToCart(product);
+    const variantDetails = selectedVariant
+      ? [
+          selectedVariant.size ? `Size: ${selectedVariant.size}` : "",
+          selectedVariant.color ? `Color: ${selectedVariant.color}` : "",
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : "";
+
+    addToCart({
+      ...product,
+      variantId: selectedVariant?.id ?? null,
+      variantDetails,
+      price: selectedVariant?.price ?? product.price,
+      stock: selectedVariant?.stock ?? product.stock,
+      cartKey: `${product.id}:${selectedVariant?.id ?? "base"}`,
+    });
 
     setSuccessMessage(
-      `${product.name} has been successfully added to your cart.`
+      `${product.name}${variantDetails ? ` (${variantDetails})` : ""} has been added to your cart.`
     );
 
     setShowSuccess(true);
   }
 
-  function handleBuyNow() {
-    if (Number(product.stock) <= 0) {
-      return;
-    }
-
-    router.push({
-      pathname: "/checkout",
-      params: {
-        buyNowProductId: product.id,
-      },
-    });
-  }
-
   const productImageUrl = getProductImageUrl(product.image_url);
-  const isOutOfStock = Number(product.stock) <= 0;
+  const variants = product.variants || [];
+  const sizes = [...new Set(variants.map((variant) => variant.size).filter(Boolean))];
+  const colors = [...new Set(variants.map((variant) => variant.color).filter(Boolean))];
+  const selectedVariant = variants.find(
+    (variant) =>
+      (!sizes.length || variant.size === selectedSize) &&
+      (!colors.length || variant.color === selectedColor)
+  );
+  const isVariationRequired = variants.length > 0;
+  const isOutOfStock = Number(
+    selectedVariant?.stock ?? (isVariationRequired ? 0 : product.stock)
+  ) <= 0;
+  const canAddToCart =
+    !isStaffBrowsing &&
+    !isOutOfStock &&
+    (!isVariationRequired || Boolean(selectedVariant));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -319,9 +355,102 @@ export default function ProductDetailsScreen() {
           Sold by {product.seller}
         </Text>
 
+        {isVariationRequired ? (
+          <View style={styles.variationOptions}>
+            {sizes.length > 0 ? (
+              <>
+                <Text style={styles.optionLabel}>Size</Text>
+                <View style={styles.optionList}>
+                  {sizes.map((size) => {
+                    const isAvailable = variants.some(
+                      (variant) =>
+                        variant.size === size &&
+                        (!selectedColor || variant.color === selectedColor)
+                    );
+                    const isSelected = size === selectedSize;
+
+                    return (
+                      <TouchableOpacity
+                        key={size}
+                        style={[
+                          styles.variantOption,
+                          isSelected && styles.variantOptionSelected,
+                          !isAvailable && styles.variantOptionDisabled,
+                        ]}
+                        onPress={() => setSelectedSize(size)}
+                        disabled={!isAvailable}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          selected: isSelected,
+                          disabled: !isAvailable,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.variantOptionText,
+                            isSelected && styles.variantOptionTextSelected,
+                          ]}
+                        >
+                          {size}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+
+            {colors.length > 0 ? (
+              <>
+                <Text style={styles.optionLabel}>Color</Text>
+                <View style={styles.optionList}>
+                  {colors.map((color) => {
+                    const isAvailable = variants.some(
+                      (variant) =>
+                        variant.color === color &&
+                        (!selectedSize || variant.size === selectedSize)
+                    );
+                    const isSelected = color === selectedColor;
+
+                    return (
+                      <TouchableOpacity
+                        key={color}
+                        style={[
+                          styles.variantOption,
+                          isSelected && styles.variantOptionSelected,
+                          !isAvailable && styles.variantOptionDisabled,
+                        ]}
+                        onPress={() => setSelectedColor(color)}
+                        disabled={!isAvailable}
+                        accessibilityRole="radio"
+                        accessibilityState={{
+                          selected: isSelected,
+                          disabled: !isAvailable,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.variantOptionText,
+                            isSelected && styles.variantOptionTextSelected,
+                          ]}
+                        >
+                          {color}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
         <Text style={styles.price}>
+          {isVariationRequired && !selectedVariant ? "From " : ""}
           {"₱"}
-          {product.price.toLocaleString("en-PH")}
+          {Number(selectedVariant?.price ?? product.price).toLocaleString(
+            "en-PH"
+          )}
         </Text>
 
         <Text style={styles.shippingFee}>
@@ -338,9 +467,11 @@ export default function ProductDetailsScreen() {
             isOutOfStock && styles.outOfStockText,
           ]}
         >
-          {isOutOfStock
-            ? "Currently out of stock"
-            : `${product.stock} available`}
+          {isVariationRequired && !selectedVariant
+            ? "Choose options to see available stock"
+            : isOutOfStock
+              ? "Currently out of stock"
+              : `${selectedVariant?.stock ?? product.stock} available`}
         </Text>
 
         <View style={styles.divider} />
@@ -364,35 +495,24 @@ export default function ProductDetailsScreen() {
           </Text>
         </View>
 
-        {/* Add to Cart and Buy Now buttons */}
         {!isStaffBrowsing && (
           <View style={styles.actionButtons}>
             <TouchableOpacity
               style={[
                 styles.cartButton,
-                styles.actionButton,
                 isOutOfStock && styles.disabledButton,
               ]}
-              disabled={isOutOfStock}
+              disabled={!canAddToCart}
               onPress={handleAddToCart}
               accessibilityRole="button"
             >
               <Text style={styles.cartButtonText}>
-                {isOutOfStock ? "Out of Stock" : "Add to Cart"}
+                {isVariationRequired && !selectedVariant
+                  ? "Choose options"
+                  : isOutOfStock
+                    ? "Out of Stock"
+                    : "Add to Cart"}
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.buyNowButton,
-                styles.actionButton,
-                isOutOfStock && styles.disabledButton,
-              ]}
-              disabled={isOutOfStock}
-              onPress={handleBuyNow}
-              accessibilityRole="button"
-            >
-              <Text style={styles.cartButtonText}>Buy Now</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -484,6 +604,43 @@ const styles = StyleSheet.create({
     color: "#758173",
     marginTop: 8,
   },
+  variationOptions: {
+    gap: 12,
+    marginTop: 20,
+  },
+  optionLabel: {
+    color: "#214D39",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  optionList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  variantOption: {
+    borderWidth: 1,
+    borderColor: "#C9D5C9",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  variantOptionSelected: {
+    borderColor: "#245B43",
+    backgroundColor: "#E6F0E7",
+  },
+  variantOptionDisabled: {
+    opacity: 0.4,
+  },
+  variantOptionText: {
+    color: "#536A58",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  variantOptionTextSelected: {
+    color: "#245B43",
+  },
   price: {
     fontSize: 27,
     fontWeight: "900",
@@ -557,13 +714,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: "center",
     marginTop: 24,
-  },
-  buyNowButton: {
-    backgroundColor: "#D98B35",
-    borderRadius: 15,
-    paddingVertical: 17,
-    paddingHorizontal: 8,
-    alignItems: "center",
   },
   disabledButton: {
     backgroundColor: "#9AA096",
