@@ -69,7 +69,7 @@ function formatProduct(product) {
 
 export default function ProductDetailsScreen() {
   const { id } = useLocalSearchParams();
-  const { addToCart } = useCart();
+  const { addToCart, setBuyNowItem } = useCart();
   const { user, isLoading: authLoading } = useAuth();
   const isStaffBrowsing = authLoading || user?.role === "staff";
 
@@ -214,7 +214,7 @@ export default function ProductDetailsScreen() {
     );
   }
 
-  function handleAddToCart() {
+  function getSelectedCartItem() {
     const variantDetails = selectedVariant
       ? [
           selectedVariant.size ? `Size: ${selectedVariant.size}` : "",
@@ -224,17 +224,23 @@ export default function ProductDetailsScreen() {
           .join(", ")
       : "";
 
-    addToCart({
+    return {
       ...product,
       variantId: selectedVariant?.id ?? null,
       variantDetails,
       price: selectedVariant?.price ?? product.price,
       stock: selectedVariant?.stock ?? product.stock,
       cartKey: `${product.id}:${selectedVariant?.id ?? "base"}`,
-    });
+      quantity: 1,
+    };
+  }
+
+  function handleAddToCart() {
+    const cartItem = getSelectedCartItem();
+    addToCart(cartItem);
 
     setSuccessMessage(
-      `${product.name}${variantDetails ? ` (${variantDetails})` : ""} has been added to your cart.`
+      `${product.name}${cartItem.variantDetails ? ` (${cartItem.variantDetails})` : ""} has been added to your cart.`
     );
 
     setShowSuccess(true);
@@ -257,6 +263,11 @@ export default function ProductDetailsScreen() {
     !isStaffBrowsing &&
     !isOutOfStock &&
     (!isVariationRequired || Boolean(selectedVariant));
+
+  function handleBuyNow() {
+    setBuyNowItem(getSelectedCartItem());
+    router.push({ pathname: "/checkout", params: { mode: "buyNow" } });
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -445,34 +456,83 @@ export default function ProductDetailsScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.price}>
-          {isVariationRequired && !selectedVariant ? "From " : ""}
-          {"₱"}
-          {Number(selectedVariant?.price ?? product.price).toLocaleString(
-            "en-PH"
+        <View style={styles.purchaseRow}>
+          <View style={styles.purchaseDetails}>
+            <Text style={styles.price}>
+              {isVariationRequired && !selectedVariant ? "From " : ""}
+              {"₱"}
+              {Number(selectedVariant?.price ?? product.price).toLocaleString(
+                "en-PH"
+              )}
+            </Text>
+
+            <Text style={styles.shippingFee}>
+              Shipping: ₱{Number(product.shipping_fee || 0).toLocaleString(
+                "en-PH",
+                { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+              )}{" "}
+              (fixed fee; may be shared across this seller&apos;s items)
+            </Text>
+
+            <Text
+              style={[
+                styles.stock,
+                isOutOfStock && styles.outOfStockText,
+              ]}
+            >
+              {isVariationRequired && !selectedVariant
+                ? "Choose options to see available stock"
+                : isOutOfStock
+                  ? "Currently out of stock"
+                  : `${selectedVariant?.stock ?? product.stock} available`}
+            </Text>
+          </View>
+
+          {!isStaffBrowsing && (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.cartButton,
+                  styles.addToCartButton,
+                  isOutOfStock && styles.disabledButton,
+                ]}
+                disabled={!canAddToCart}
+                onPress={handleAddToCart}
+                accessibilityRole="button"
+                accessibilityLabel="Add to cart"
+              >
+                <Text
+                  style={[styles.cartButtonText, styles.addToCartButtonText]}
+                >
+                  {isVariationRequired && !selectedVariant
+                    ? "Choose options"
+                    : isOutOfStock
+                      ? "Out of Stock"
+                      : "Add to Cart"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.cartButton,
+                  styles.buyNowButton,
+                  isOutOfStock && styles.disabledButton,
+                ]}
+                disabled={!canAddToCart}
+                onPress={handleBuyNow}
+                accessibilityRole="button"
+                accessibilityLabel="Buy now"
+              >
+                <Text style={styles.cartButtonText}>
+                  {isVariationRequired && !selectedVariant
+                    ? "Choose options"
+                    : isOutOfStock
+                      ? "Out of Stock"
+                      : "Buy Now"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
-        </Text>
-
-        <Text style={styles.shippingFee}>
-          Shipping: ₱{Number(product.shipping_fee || 0).toLocaleString(
-            "en-PH",
-            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-          )}{" "}
-          (fixed fee; may be shared across this seller&apos;s items)
-        </Text>
-
-        <Text
-          style={[
-            styles.stock,
-            isOutOfStock && styles.outOfStockText,
-          ]}
-        >
-          {isVariationRequired && !selectedVariant
-            ? "Choose options to see available stock"
-            : isOutOfStock
-              ? "Currently out of stock"
-              : `${selectedVariant?.stock ?? product.stock} available`}
-        </Text>
+        </View>
 
         <View style={styles.divider} />
 
@@ -494,28 +554,6 @@ export default function ProductDetailsScreen() {
               : "Discover products and stories from Filipino makers and small businesses."}
           </Text>
         </View>
-
-        {!isStaffBrowsing && (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[
-                styles.cartButton,
-                isOutOfStock && styles.disabledButton,
-              ]}
-              disabled={!canAddToCart}
-              onPress={handleAddToCart}
-              accessibilityRole="button"
-            >
-              <Text style={styles.cartButtonText}>
-                {isVariationRequired && !selectedVariant
-                  ? "Choose options"
-                  : isOutOfStock
-                    ? "Out of Stock"
-                    : "Add to Cart"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         <Text style={styles.disclaimer}>
           Product information is retrieved from the LikhaLocal database.
@@ -697,10 +735,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
+  purchaseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 16,
+  },
+  purchaseDetails: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 220,
+    minWidth: 0,
+  },
   actionButtons: {
     flexDirection: "row",
-    gap: 10,
-    marginTop: 24,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginLeft: "auto",
+    flexShrink: 0,
   },
   actionButton: {
     flex: 1,
@@ -711,9 +764,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#245B43",
     borderRadius: 15,
     paddingVertical: 17,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
+    minWidth: 112,
+    minHeight: 50,
     alignItems: "center",
-    marginTop: 24,
+    justifyContent: "center",
+    marginTop: 0,
+  },
+  addToCartButton: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#245B43",
+  },
+  addToCartButtonText: {
+    color: "#245B43",
+  },
+  buyNowButton: {
+    backgroundColor: "#245B43",
   },
   disabledButton: {
     backgroundColor: "#9AA096",

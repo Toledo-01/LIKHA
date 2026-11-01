@@ -153,8 +153,17 @@ if (!JWT_SECRET) {
 }
 
 function getPasswordResetTransport() {
-  const { SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM } = process.env;
-  const port = Number(process.env.SMTP_PORT);
+  const isGmail =
+    String(process.env.SMTP_PROVIDER || "").trim().toLowerCase() === "gmail";
+  const SMTP_USER = process.env.SMTP_USER;
+  const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
+  const SMTP_HOST = process.env.SMTP_HOST || (isGmail ? "smtp.gmail.com" : "");
+  const SMTP_FROM = process.env.SMTP_FROM || (isGmail ? SMTP_USER : "");
+  const port = Number(process.env.SMTP_PORT || (isGmail ? 465 : NaN));
+  const secure =
+    process.env.SMTP_SECURE === undefined
+      ? isGmail && port === 465
+      : process.env.SMTP_SECURE === "true";
 
   if (
     !SMTP_HOST ||
@@ -172,7 +181,7 @@ function getPasswordResetTransport() {
     transporter: nodemailer.createTransport({
       host: SMTP_HOST,
       port,
-      secure: process.env.SMTP_SECURE === "true",
+      secure,
       auth: {
         user: SMTP_USER,
         pass: SMTP_PASSWORD,

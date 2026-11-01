@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { File } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -102,6 +102,8 @@ export default function SellerDashboard() {
   const [savingProduct, setSavingProduct] = useState(false);
   const [processingOrderId, setProcessingOrderId] = useState(null);
   const [shipmentDetails, setShipmentDetails] = useState({});
+  const knownReturnRequestIds = useRef(null);
+  const returnPollInProgress = useRef(false);
 
   const [pageError, setPageError] = useState("");
   const [orderError, setOrderError] = useState("");
@@ -111,6 +113,17 @@ export default function SellerDashboard() {
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
   const [activeSection, setActiveSection] = useState("home");
+  const pendingOrderCount = orders.filter(
+    (order) => String(order.sellerStatus || "pending").toLowerCase() === "pending"
+  ).length;
+  const returnRequests = orders.flatMap((order) =>
+    (order.items || [])
+      .filter((item) => item.returnRequest)
+      .map((item) => ({ ...item, order }))
+  );
+  const pendingReturnCount = returnRequests.filter(
+    ({ returnRequest }) => returnRequest.status === "requested"
+  ).length;
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -165,17 +178,53 @@ export default function SellerDashboard() {
     }
   }, []);
 
-  const loadSellerOrders = useCallback(async () => {
-    setLoadingOrders(true);
+  const loadSellerOrders = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoadingOrders(true);
+    }
     setOrderError("");
 
     try {
       const orderData = await fetchSellerOrders();
       setOrders(orderData || []);
+      const currentRequests = (orderData || []).flatMap((order) =>
+        (order.items || [])
+          .filter((item) => item.returnRequest)
+          .map((item) => ({
+            id: String(item.returnRequest.id),
+            status: item.returnRequest.status,
+            orderId: order.id,
+            productName: item.productName || "Product",
+          }))
+      );
+      const currentIds = new Set(currentRequests.map((request) => request.id));
+
+      if (knownReturnRequestIds.current === null) {
+        knownReturnRequestIds.current = currentIds;
+      } else {
+        const newRequests = currentRequests.filter(
+          (request) =>
+            request.status === "requested" &&
+            !knownReturnRequestIds.current.has(request.id)
+        );
+        knownReturnRequestIds.current = currentIds;
+
+        if (newRequests.length > 0) {
+          const firstRequest = newRequests[0];
+          showMessage(
+            "New return request",
+            newRequests.length === 1
+              ? `${firstRequest.productName} · Order #${firstRequest.orderId}`
+              : `${newRequests.length} new customer return requests need your review.`
+          );
+        }
+      }
     } catch (error) {
       setOrderError(error.message || "Unable to load your orders.");
     } finally {
-      setLoadingOrders(false);
+      if (!silent) {
+        setLoadingOrders(false);
+      }
     }
   }, []);
 
@@ -194,14 +243,39 @@ export default function SellerDashboard() {
   }, []);
 
   const refreshSellerDashboard = useCallback(async () => {
-    await Promise.all([loadSellerData(), loadSellerOrders()]);
-  }, [loadSellerData, loadSellerOrders]);
+    await Promise.all([
+      loadSellerData(),
+      loadSellerOrders(),
+      loadSellerReviews(),
+    ]);
+  }, [loadSellerData, loadSellerOrders, loadSellerReviews]);
 
   useEffect(() => {
     if (!isLoading && user?.role === "seller") {
       Promise.resolve().then(refreshSellerDashboard);
     }
   }, [isLoading, user, refreshSellerDashboard]);
+
+  useEffect(() => {
+    if (isLoading || user?.role !== "seller") {
+      return undefined;
+    }
+
+    const intervalId = setInterval(async () => {
+      if (returnPollInProgress.current) {
+        return;
+      }
+
+      returnPollInProgress.current = true;
+      try {
+        await loadSellerOrders({ silent: true });
+      } finally {
+        returnPollInProgress.current = false;
+      }
+    }, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [isLoading, user, loadSellerOrders]);
 
   async function loadDeliveryOrigin() {
     setLoadingDeliveryOrigin(true);
@@ -263,6 +337,10 @@ export default function SellerDashboard() {
     setActiveSection(section);
 
     if (section === "orders") {
+      loadSellerOrders();
+    }
+
+    if (section === "returns") {
       loadSellerOrders();
     }
 
@@ -741,6 +819,13 @@ async function handleCreateProduct() {
                 onPress={() => openSection("orders")}
                 activeOpacity={0.8}
               >
+                {pendingOrderCount > 0 ? (
+                  <View style={styles.navigationBadge}>
+                    <Text style={styles.navigationBadgeText}>
+                      {pendingOrderCount > 99 ? "99+" : pendingOrderCount}
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={styles.iconCircle}>
                   <Text style={styles.navigationIcon}>▤</Text>
                 </View>
@@ -749,7 +834,8 @@ async function handleCreateProduct() {
                   style={styles.navigationDescription}
                   numberOfLines={3}
                 >
-                  Review orders and manage customer requests.
+                  {pendingOrderCount} pending{" "}
+                  {pendingOrderCount === 1 ? "order" : "orders"} to review.
                 </Text>
                 <Text style={styles.navigationLink}>View →</Text>
               </TouchableOpacity>
@@ -759,6 +845,13 @@ async function handleCreateProduct() {
                 onPress={() => openSection("reviews")}
                 activeOpacity={0.8}
               >
+                {reviews.length > 0 ? (
+                  <View style={styles.navigationBadge}>
+                    <Text style={styles.navigationBadgeText}>
+                      {reviews.length > 99 ? "99+" : reviews.length}
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={styles.iconCircle}>
                   <Text style={styles.navigationIcon}>★</Text>
                 </View>
@@ -770,6 +863,32 @@ async function handleCreateProduct() {
                   Read feedback customers leave for your products.
                 </Text>
                 <Text style={styles.navigationLink}>View reviews →</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navigationCard, styles.returnsCard]}
+                onPress={() => openSection("returns")}
+                activeOpacity={0.8}
+              >
+                {pendingReturnCount > 0 ? (
+                  <View style={styles.navigationBadge}>
+                    <Text style={styles.navigationBadgeText}>
+                      {pendingReturnCount > 99 ? "99+" : pendingReturnCount}
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.iconCircle}>
+                  <Text style={styles.navigationIcon}>↩</Text>
+                </View>
+                <Text style={styles.navigationTitle}>Returned Products</Text>
+                <Text
+                  style={styles.navigationDescription}
+                  numberOfLines={3}
+                >
+                  {pendingReturnCount} return{" "}
+                  {pendingReturnCount === 1 ? "request" : "requests"} to review.
+                </Text>
+                <Text style={styles.navigationLink}>View returns →</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1681,6 +1800,129 @@ async function handleCreateProduct() {
           </>
         )}
 
+        {activeSection === "returns" && (
+          <>
+            <View style={styles.sectionIntro}>
+              <Text style={styles.sectionHeading}>Returned Products</Text>
+              <Text style={styles.description}>
+                Review customer return requests and approve or reject pending
+                requests.
+              </Text>
+            </View>
+
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.cardTitle}>Return Requests</Text>
+                <TouchableOpacity
+                  onPress={loadSellerOrders}
+                  disabled={loadingOrders || processingOrderId !== null}
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh return requests"
+                >
+                  <Text style={styles.refreshText}>
+                    {loadingOrders ? "Loading..." : "Refresh"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {loadingOrders ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="large" color="#245B43" />
+                  <Text style={styles.description}>
+                    Loading return requests...
+                  </Text>
+                </View>
+              ) : orderError ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.errorText}>{orderError}</Text>
+                  <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={loadSellerOrders}
+                  >
+                    <Text style={styles.refreshText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : returnRequests.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyIcon}>↩</Text>
+                  <Text style={styles.emptyTitle}>No return requests</Text>
+                  <Text style={styles.description}>
+                    Customer return requests will appear here.
+                  </Text>
+                </View>
+              ) : (
+                returnRequests.map(({ order, ...item }) => (
+                  <View
+                    key={item.returnRequest.id}
+                    style={styles.returnRequestCard}
+                  >
+                    <View style={styles.orderCardHeader}>
+                      <View style={styles.orderHeadingInfo}>
+                        <Text style={styles.orderProductName}>
+                          {item.productName || "Product"}
+                        </Text>
+                        <Text style={styles.orderDate}>
+                          Order #{order.id} · {order.customerName || "Customer"}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.returnStatus,
+                          item.returnRequest.status === "requested"
+                            ? styles.returnStatusPending
+                            : styles.returnStatusResolved,
+                        ]}
+                      >
+                        {item.returnRequest.status}
+                      </Text>
+                    </View>
+                    {item.variantDetails ? (
+                      <Text style={styles.orderDetail}>
+                        {item.variantDetails}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.orderDetail}>
+                      Quantity: {item.quantity ?? 0}
+                    </Text>
+                    <Text style={styles.orderDetail}>
+                      Reason: {item.returnRequest.reason}
+                      {item.returnRequest.details
+                        ? ` — ${item.returnRequest.details}`
+                        : ""}
+                    </Text>
+                    {item.returnRequest.status === "requested" ? (
+                      <View style={styles.orderActionRow}>
+                        <TouchableOpacity
+                          style={styles.orderApproveButton}
+                          onPress={() =>
+                            handleReturnDecision(
+                              item.returnRequest,
+                              "approved"
+                            )
+                          }
+                        >
+                          <Text style={styles.buttonText}>Approve Return</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.orderRejectButton}
+                          onPress={() =>
+                            handleReturnDecision(
+                              item.returnRequest,
+                              "rejected"
+                            )
+                          }
+                        >
+                          <Text style={styles.buttonText}>Reject Return</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                ))
+              )}
+            </View>
+          </>
+        )}
+
         {activeSection === "reviews" && (
           <>
             <View style={styles.sectionIntro}>
@@ -1969,9 +2211,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7EEF8",
     borderColor: "#E4D2E8",
   },
+  returnsCard: {
+    backgroundColor: "#FFF1E9",
+    borderColor: "#F0D2C1",
+  },
   deliveryOriginCard: {
     backgroundColor: "#E9EEF9",
     borderColor: "#CCD8EF",
+  },
+  navigationBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    backgroundColor: "#B42318",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  navigationBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
   },
   iconCircle: {
     width: 38,
@@ -2547,6 +2811,32 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     backgroundColor: "#FFF8E8",
     gap: 8,
+  },
+  returnRequestCard: {
+    backgroundColor: "#FFF8E8",
+    borderWidth: 1,
+    borderColor: "#F1DFC0",
+    borderRadius: 12,
+    padding: 13,
+    marginTop: 12,
+    gap: 8,
+  },
+  returnStatus: {
+    overflow: "hidden",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "capitalize",
+  },
+  returnStatusPending: {
+    backgroundColor: "#FCE8C7",
+    color: "#8A4B08",
+  },
+  returnStatusResolved: {
+    backgroundColor: "#DDF4E4",
+    color: "#16803C",
   },
   orderActionRow: {
     flexDirection: "row",

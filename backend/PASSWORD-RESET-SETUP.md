@@ -1,10 +1,19 @@
 # Password reset setup
 
 1. Apply `password-reset-migration.sql` to the application database.
-2. Configure these backend environment variables in local `.env` and the
-   production hosting environment:
+2. For Gmail, create a Google App Password (requires 2-Step Verification) and
+   configure these backend environment variables in local `.env` and the
+   production hosting environment. Do not use your regular Gmail password:
+   - `SMTP_PROVIDER=gmail`
+   - `SMTP_USER` (your Gmail address)
+   - `SMTP_PASSWORD` (the Google App Password)
+   - `SMTP_FROM` (optional; defaults to `SMTP_USER`)
+
+   Gmail defaults to `smtp.gmail.com`, port `465`, and implicit TLS. You can
+   override these using the generic SMTP variables below. For other SMTP
+   providers, configure:
    - `SMTP_HOST`
-   - `SMTP_PORT` (usually `587` or `465`)
+   - `SMTP_PORT` (usually `587` or `465`; Gmail defaults to `465`)
    - `SMTP_SECURE` (`false` for STARTTLS/587, `true` for implicit TLS/465)
    - `SMTP_USER`
    - `SMTP_PASSWORD`

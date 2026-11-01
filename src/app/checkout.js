@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { useCart } from "../context/CartContext";
 import { createCustomerOrder } from "../services/api";
@@ -52,7 +52,13 @@ const PAYMENT_OPTIONS = [
 ];
 
 export default function CheckoutScreen() {
-  const { cartItems, clearCart } = useCart();
+  const { mode } = useLocalSearchParams();
+  const {
+    cartItems,
+    clearCart,
+    buyNowItem,
+    clearBuyNowItem,
+  } = useCart();
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -65,7 +71,12 @@ export default function CheckoutScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderConfirmation, setOrderConfirmation] = useState(null);
 
-  const checkoutItems = cartItems;
+  const isBuyNow = mode === "buyNow";
+  const checkoutItems = isBuyNow
+    ? buyNowItem
+      ? [buyNowItem]
+      : []
+    : cartItems;
 
   const subtotal = checkoutItems.reduce((sum, item) => {
     return (
@@ -175,7 +186,11 @@ export default function CheckoutScreen() {
         customerName: fullName.trim(),
       });
 
-      clearCart();
+      if (isBuyNow) {
+        clearBuyNowItem();
+      } else {
+        clearCart();
+      }
     } catch (err) {
       setError(
         err.message || "Failed to place your order. Please try again."

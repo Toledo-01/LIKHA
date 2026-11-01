@@ -10,6 +10,7 @@ function getCartItemKey(item) {
 
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
+  const [buyNowItem, setBuyNowItem] = useState(null);
 
   const addToCart = (product) => {
     if (Number(product.stock) <= 0) {
@@ -76,6 +77,10 @@ export function CartProvider({ children }) {
     setCartItems([]);
   };
 
+  const clearBuyNowItem = () => {
+    setBuyNowItem(null);
+  };
+
   const cartCount = cartItems.reduce(
     (total, item) => total + item.quantity,
     0
@@ -91,6 +96,9 @@ export function CartProvider({ children }) {
       value={{
         cartItems,
         addToCart,
+        buyNowItem,
+        setBuyNowItem,
+        clearBuyNowItem,
         updateQuantity,
         removeFromCart,
         clearCart,
