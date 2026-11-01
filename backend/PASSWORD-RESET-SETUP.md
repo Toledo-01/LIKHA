@@ -1,6 +1,8 @@
 # Password reset setup
 
-1. Apply `password-reset-migration.sql` to the application database.
+1. Apply `firebase-user-migration.sql` and `password-reset-migration.sql` to the
+   application database. The Firebase migration adds the `firebase_uid` column
+   used by authentication and password recovery.
 2. For Gmail, create a Google App Password (requires 2-Step Verification) and
    configure these backend environment variables in local `.env` and the
    production hosting environment. Do not use your regular Gmail password:
